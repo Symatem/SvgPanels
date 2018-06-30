@@ -1,0 +1,33 @@
+.selected {
+    filter: url(#blurFilter);
+}
+
+.disabled, .fadeOut {
+    pointer-events: none;
+}
+
+@keyframes fadeOut {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+@keyframes fadeIn {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+}
+
+.fadeIn {
+    animation: fadeIn 0.25s ease-in-out forwards;
+}
+
+.fadeOut {
+    animation: fadeOut 0.25s ease-in-out forwards;
+}
+
+svg {
+    -moz-user-select: none;
+    -webkit-user-select: none;
+    -ms-user-select: none;
+    -o-user-select: none;
+    user-select: none;
+}

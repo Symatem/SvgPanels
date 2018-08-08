@@ -71,52 +71,61 @@ export class Panel {
             this.selected = true;
     }
 
-    registerPointerEvents(pointerStart) {
+    registerPointerEvents(pointerStart, referenceNode) {
         let primaryTouchID, zoom;
-        function dualTouchDistance(event) {
-            if(!event.touches || event.touches.length != 2)
-                return 0;
-            return vec2.distance(vec2.fromValues(event.touches[0].clientX, event.touches[0].clientY), vec2.fromValues(event.touches[1].clientX, event.touches[1].clientY));
+        function dualPointerDistance(event) {
+            return (event.pointers.length == 2) ? vec2.distance(event.pointers[0].position, event.pointers[1].position) : 0;
         }
         function refineEvent(event) {
-            event.modifierKey = event.shiftKey;
             if(event.touches) {
-                const modifierKey = (event.touches.length === 2);
-                if(event.touches.length > 0)
-                    event = event.touches[0];
-                event.modifierKey = modifierKey;
+                event.modifierKey = (event.touches.length === 2);
+                event.pointers = event.touches;
+            } else {
+                event.modifierKey = event.shiftKey;
+                event.pointers = [event];
             }
-            return event;
+            if(referenceNode) {
+                const bounds = referenceNode.getBoundingClientRect();
+                for(const pointer of event.pointers)
+                    pointer.position = vec2.fromValues(pointer.clientX-bounds.x-bounds.width*0.5, pointer.clientY-bounds.y-bounds.height*0.5);
+            } else for(const pointer of event.pointers)
+                pointer.position = vec2.fromValues(pointer.clientX, pointer.clientY)
         }
         if(this.zoom)
             this.node.onwheel = function(event) {
                 event.stopPropagation();
                 event.preventDefault();
-                this.zoom(Math.pow(2, event.deltaY*0.1));
+                refineEvent(event);
+                this.zoom(Math.pow(2, event.deltaY*0.1), event.pointers[0].position);
             }.bind(this);
         this.node.onmousedown = this.node.ontouchstart = function(event) {
             event.stopPropagation();
             event.preventDefault();
             if(this.root.node.ontouchstart)
                 return;
+            refineEvent(event);
             if(event.touches) {
                 primaryTouchID = event.touches[0].identifier;
-                zoom = dualTouchDistance(event);
+                zoom = dualPointerDistance(event);
                 zoom = (zoom < 300) ? 0 : zoom;
             }
-            const [pointerMoving, pointerEnd] = pointerStart(refineEvent(event));
+            const [pointerMoving, pointerEnd] = pointerStart(event);
             if(pointerMoving)
                 this.root.node.onmousemove = this.root.node.ontouchmove = function(event) {
                     event.stopPropagation();
                     event.preventDefault();
+                    refineEvent(event);
                     if(zoom) {
-                        const dist = dualTouchDistance(event);
+                        const dist = dualPointerDistance(event);
                         if(dist > 0 && this.zoom) {
-                            this.zoom(dist/zoom);
+                            const center = vec2.create();
+                            vec2.add(center, event.pointers[0].position, event.pointers[1].position);
+                            vec2.scale(center, center, 0.5);
+                            this.zoom(dist/zoom, center);
                             zoom = dist;
                         }
                     } else
-                        pointerMoving(refineEvent(event));
+                        pointerMoving(event);
                 }.bind(this);
             if(pointerEnd)
                 this.root.node.onmouseup = this.root.node.ontouchend = this.root.node.onmouseleave = this.root.node.ontouchleave = this.root.node.ontouchcancel = function(event) {
@@ -124,6 +133,7 @@ export class Panel {
                     event.preventDefault();
                     if(event.touches && event.touches.length > 0 && primaryTouchID != event.changedTouches[0].identifier)
                         return;
+                    refineEvent(event);
                     this.root.node.onmousemove = null;
                     this.root.node.ontouchmove = null;
                     this.root.node.onmouseup = null;
@@ -131,7 +141,7 @@ export class Panel {
                     this.root.node.onmouseleave = null;
                     this.root.node.ontouchleave = null;
                     this.root.node.ontouchcancel = null;
-                    pointerEnd(refineEvent(event));
+                    pointerEnd(event);
                 }.bind(this);
             if(event.type === 'touchstart') {
                 this.node.onmousedown = null;
@@ -341,31 +351,30 @@ export class ViewPanel extends ClippingPanel {
         this.maxScale = 1.0;
         this.registerPointerEvents(function(event) {
             if(event.modifierKey) {
-                this.dragOrigin = this.getCursorPosition(event);
+                this.dragOrigin = this.mapPositionInView(event.pointers[0].position);
                 return [function(event) {
                     if(!this.selectionRect) {
                         this.selectionRect = new RectPanel(vec2.create(), vec2.create());
                         this.selectionRect.node.classList.add('disabled');
                         this.appendChild(this.selectionRect);
                     }
-                    const cursor = this.getCursorPosition(event);
+                    const cursor = this.mapPositionInView(event.pointers[0].position);
                     this.selectionRect.setBounds(this.dragOrigin, cursor);
                     this.selectionRect.updateTransformation();
                 }.bind(this), function(event) {
                     if(!this.selectionRect)
                         return;
-                    this.selectIfInside(this.selectionRect.minPosition, this.selectionRect.maxPosition, event.shiftKey);
+                    this.selectIfInside(this.selectionRect.minPosition, this.selectionRect.maxPosition, event.modifierKey);
                     this.selectionRect.selected = false;
                     this.removeChild(this.selectionRect);
                     delete this.selectionRect;
                 }.bind(this)];
             } else {
-                this.dragOrigin = vec2.fromValues(event.clientX, event.clientY);
+                this.dragOrigin = event.pointers[0].position;
                 this.prevTranslation = this.translation;
                 this.translation = vec2.clone(this.translation);
                 return [function(event) {
-                    vec2.sub(this.translation, vec2.fromValues(event.clientX, event.clientY), this.dragOrigin);
-                    vec2.scale(this.translation, this.translation, 1.0/this.scale);
+                    vec2.sub(this.translation, event.pointers[0].position, this.dragOrigin);
                     vec2.add(this.translation, this.translation, this.prevTranslation);
                     this.updateContentTransformation();
                 }.bind(this), function(event) {
@@ -374,25 +383,27 @@ export class ViewPanel extends ClippingPanel {
                     delete this.prevTranslation;
                 }.bind(this)];
             }
-        }.bind(this));
+        }.bind(this), this.rectPanel.node);
     }
 
-    zoom(factor) {
+    zoom(factor, position) {
+        factor = Math.min(Math.max(factor*this.scale, this.minScale), this.maxScale)/this.scale;
         this.scale *= factor;
-        this.scale = Math.min(Math.max(this.scale, this.minScale), this.maxScale);
+        vec2.sub(this.translation, this.translation, position);
+        vec2.scale(this.translation, this.translation, factor);
+        vec2.add(this.translation, this.translation, position);
         this.updateContentTransformation();
     }
 
-    getCursorPosition(event) {
-        const bounds = this.rectPanel.node.getBoundingClientRect(),
-              cursor = vec2.fromValues(event.clientX-bounds.x-bounds.width*0.5, event.clientY-bounds.y-bounds.height*0.5);
+    mapPositionInView(position) {
+        const cursor = vec2.create();
+        vec2.sub(cursor, position, this.translation);
         vec2.scale(cursor, cursor, 1.0/this.scale);
-        vec2.sub(cursor, cursor, this.translation);
         return cursor;
     }
 
     updateContentTransformation() {
-        this.contentNode.setAttribute('transform', 'scale('+this.scale+') translate('+this.translation[0]+', '+this.translation[1]+')');
+        this.contentNode.setAttribute('transform', 'translate('+this.translation[0]+', '+this.translation[1]+') scale('+this.scale+')');
     }
 };
 
@@ -417,10 +428,10 @@ export class StackingPanel extends ContainerPanel {
             for(const child of this.children)
                 if(child.selected)
                     this.dragChildren.set(child, vec2.clone(child.position));
-            this.dragOrigin = vec2.fromValues(event.clientX, event.clientY);
+            this.dragOrigin = event.pointers[0].position;
             return [function(event) {
                 for(const [child, prevPosition] of this.dragChildren) {
-                    vec2.sub(child.position, vec2.fromValues(event.clientX, event.clientY), this.dragOrigin);
+                    vec2.sub(child.position, event.pointers[0].position, this.dragOrigin);
                     if(this.parent.scale)
                         vec2.scale(child.position, child.position, 1.0/this.parent.scale);
                     vec2.add(child.position, child.position, prevPosition);

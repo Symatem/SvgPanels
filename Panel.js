@@ -6,7 +6,7 @@ export class Panel {
         if(parentNode)
             parentNode.appendChild(svgElement);
         return svgElement;
-    };
+    }
 
     static setAttribute(node, attribute, value) {
         node.setAttributeNS('http://www.w3.org/1999/xlink', attribute, value);
@@ -188,6 +188,33 @@ export class RectPanel extends Panel {
     set cornerRadius(radius) {
         this.node.setAttribute('rx', radius);
         this.node.setAttribute('ry', radius);
+    }
+};
+
+export class LabelPanel extends Panel {
+    constructor(position) {
+        super(position, vec2.create());
+        this.node = Panel.createElement('text');
+    }
+
+    updateTransformation() {
+        try {
+            const bbox = this.node.getBBox();
+            this.size[0] = bbox.width;
+            this.size[1] = bbox.height;
+        } catch(error) { }
+        super.updateTransformation();
+        this.node.setAttribute('x', this.position[0]-this.size[0]*0.5);
+        this.node.setAttribute('y', this.position[1]+this.size[1]*0.5);
+    }
+
+    get text() {
+        return this.node.textContent;
+    }
+
+    set text(text) {
+        this.node.textContent = text;
+        this.updateTransformation();
     }
 };
 

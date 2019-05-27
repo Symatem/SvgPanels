@@ -6,7 +6,7 @@ export class LabelPanel extends Panel {
         super(position, vec2.create(), Panel.createElement('text'));
     }
 
-    updateSize() {
+    recalculateLayout() {
         if(!this.parent)
             return;
         const bbox = this.node.getBBox();
@@ -21,7 +21,7 @@ export class LabelPanel extends Panel {
 
     set text(text) {
         this.node.textContent = text;
-        this.updateSize();
+        this.recalculateLayout();
     }
 }
 
@@ -61,8 +61,8 @@ export class SpeechBalloonPanel extends Panel {
     constructor(position, size) {
         super(position, size, Panel.createElement('path'));
         this.node.classList.add('speechBalloon');
-        this.cornerRadius = 0;
-        this.arrowSize = 0;
+        this.cornerRadius = 4;
+        this.arrowSize = 10;
         this.arrowOrigin = vec2.create();
     }
 
@@ -107,7 +107,6 @@ export class TabHandlePanel extends Panel {
     constructor(position, size) {
         super(position, size, Panel.createElement('path'));
         this.node.classList.add('tabHandle');
-        this.cornerRadius = 4;
         this.margin = 2;
     }
 
@@ -169,5 +168,26 @@ export class TextAreaPanel extends XhtmlPanel {
 
     set text(text) {
         this.embeddedNode.textContent = text;
+    }
+}
+
+export class ImagePanel extends Panel {
+    constructor(position, size) {
+        super(position, size, Panel.createElement('image'));
+    }
+
+    updateSize() {
+        this.node.setAttribute('x', -0.5*this.size[0]);
+        this.node.setAttribute('y', -0.5*this.size[1]);
+        this.node.setAttribute('width', this.size[0]);
+        this.node.setAttribute('height', this.size[1]);
+    }
+
+    get href() {
+        return this.node.getAttribute('href');
+    }
+
+    set href(href) {
+        Panel.setAttribute(this.node, 'href', href);
     }
 }

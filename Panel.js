@@ -1,4 +1,4 @@
-import { vec2 } from './gl-matrix.js';
+import { vec2, mat3 } from './gl-matrix.js';
 
 export class Panel {
     static createElement(tag, parentNode) {
@@ -39,6 +39,24 @@ export class Panel {
         vec2.sub(this.size, this.maxPosition, this.minPosition);
         vec2.add(this.position, this.minPosition, this.maxPosition);
         vec2.scale(this.position, this.position, 0.5);
+    }
+
+    getRootMatrix() {
+        const mat = this.root.node.getScreenCTM().inverse().multiply(this.node.getScreenCTM());
+        return mat3.fromValues(mat.a, mat.b, 0, mat.c, mat.d, 0, mat.e, mat.f, 0);
+    }
+
+    getRootPosition() {
+        const rootCTM = this.root.node.getScreenCTM(), nodeCTM = this.node.getScreenCTM();
+        return vec2.fromValues(nodeCTM.e-rootCTM.e, nodeCTM.f-rootCTM.f);
+    }
+
+    get root() {
+        return this._root;
+    }
+
+    set root(root) {
+        this._root = root;
     }
 
     get selected() {

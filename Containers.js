@@ -1,12 +1,22 @@
 import { vec2, mat3 } from './gl-matrix.js';
 import { Panel } from './Panel.js';
-import { RectPanel, TabHandlePanel } from './Atoms.js';
+import { LabelPanel, CirclePanel, RectPanel, SpeechBalloonPanel, TabHandlePanel } from './Atoms.js';
 
 export class ContainerPanel extends Panel {
     constructor(position, size, node=Panel.createElement('g')) {
         super(position, size, node);
         this.contentNode = this.node;
         this.children = [];
+    }
+
+    get root() {
+        return this._root;
+    }
+
+    set root(root) {
+        this._root = root;
+        for(const child of this.children)
+            child.root = root;
     }
 
     appendChild(child) {
@@ -23,6 +33,7 @@ export class ContainerPanel extends Panel {
         if(child.parent != this)
             return false;
         delete child.parent;
+        child.root = undefined;
         this.children.splice(this.children.indexOf(child), 1);
         this.contentNode.removeChild(child.node);
         this.recalculateLayout();
@@ -69,41 +80,14 @@ export class ContainerPanel extends Panel {
     }
 }
 
-export class AdaptiveSizeContainerPanel extends ContainerPanel {
-    constructor(position, size) {
-        super(position, size);
-        this.padding = vec2.create();
-    }
-
-    recalculateLayout() {
-        vec2.scale(this.minPosition, this.minPosition, 0.0);
-        vec2.scale(this.maxPosition, this.maxPosition, 0.0);
-        for(let i = (this.background) ? 1 : 0; i < this.children.length; ++i) {
-            const child = this.children[i];
-            vec2.min(this.minPosition, this.minPosition, child.minPosition);
-            vec2.max(this.maxPosition, this.maxPosition, child.maxPosition);
-        }
-        vec2.sub(this.minPosition, this.minPosition, this.padding);
-        vec2.add(this.maxPosition, this.maxPosition, this.padding);
-        vec2.sub(this.size, this.maxPosition, this.minPosition);
-        this.updateSize();
-    }
-
-    updateSize() {
-        super.updateSize();
-        if(this.background && this.children.length > 0) {
-            this.children[0].size = this.size;
-            this.children[0].updateSize();
-        }
-    }
-}
-
-export class ScreenPanel extends ContainerPanel {
+export class RootPanel extends ContainerPanel {
     constructor(parentNode, size) {
         super(vec2.create(), size, Panel.createElement('svg', parentNode));
         this.root = this;
-        this.contentNode = Panel.createElement('g', this.node);
-        this.overlaysNode = Panel.createElement('g', this.node);
+        this.content = new ContainerPanel(vec2.create());
+        this.appendChild(this.content);
+        this.overlays = new ContainerPanel(vec2.create());
+        this.appendChild(this.overlays);
         this.defsNode = Panel.createElement('defs', this.node);
         const blurFilter = Panel.createElement('filter', this.defsNode);
         blurFilter.setAttribute('id', 'blurFilter');
@@ -135,6 +119,48 @@ export class ScreenPanel extends ContainerPanel {
     }
 }
 
+export class AdaptiveSizeContainerPanel extends ContainerPanel {
+    constructor(position, size) {
+        super(position, size);
+        this.padding = vec2.create();
+    }
+
+    recalculateLayout() {
+        vec2.scale(this.minPosition, this.minPosition, 0.0);
+        vec2.scale(this.maxPosition, this.maxPosition, 0.0);
+        for(let i = (this.background) ? 1 : 0; i < this.children.length; ++i) {
+            const child = this.children[i];
+            vec2.min(this.minPosition, this.minPosition, child.minPosition);
+            vec2.max(this.maxPosition, this.maxPosition, child.maxPosition);
+        }
+        vec2.sub(this.minPosition, this.minPosition, this.padding);
+        vec2.add(this.maxPosition, this.maxPosition, this.padding);
+        vec2.sub(this.size, this.maxPosition, this.minPosition);
+        this.updateSize();
+    }
+
+    updateSize() {
+        super.updateSize();
+        if(this.background && this.children.length > 0) {
+            this.children[0].size = this.size;
+            this.children[0].updateSize();
+        }
+    }
+}
+
+export class ButtonPanel extends AdaptiveSizeContainerPanel {
+    constructor(position, onclick, backgroundPanel=new RectPanel(vec2.create(), vec2.create())) {
+        super(position, vec2.create());
+        this.node.onclick = onclick;
+        this.padding = vec2.fromValues(4, 2);
+        this.background = true;
+        this.appendChild(backgroundPanel);
+        backgroundPanel.cornerRadius = 3;
+        if(backgroundPanel instanceof RectPanel)
+            backgroundPanel.node.classList.add('button');
+    }
+}
+
 let clipPathID = 0;
 export class ClippingViewPanel extends ContainerPanel {
     constructor(position, size) {
@@ -159,8 +185,8 @@ export class ClippingViewPanel extends ContainerPanel {
 export class PanePanel extends ClippingViewPanel {
     constructor(position, size) {
         super(position, size);
-        this.rectPanel.node.classList.add('panePannel');
-        this.rectPanel.cornerRadius = 4;
+        this.rectPanel.node.classList.add('pane');
+        this.rectPanel.cornerRadius = 5;
     }
 }
 
@@ -170,15 +196,22 @@ export class TilingPanel extends ContainerPanel {
         this.axis = 0;
         this.fixedSize = false;
         this.strechChildren = false;
+        this.lastChildCompensation = false;
         this.alignment = 0;
         this.padding = vec2.create();
     }
 
     recalculateLayout() {
         let max = 0, offset = 0;
-        for(const child of this.children) {
+        for(let i = 0; i < this.children.length; ++i) {
+            const child = this.children[i];
+            if(this.lastChildCompensation && i == this.children.length-1) {
+                child.size[this.axis] = Math.max(0, this.size[this.axis]-offset);
+                child.updateSize();
+                offset = this.size[this.axis];
+            } else
+                offset += child.size[this.axis];
             max = Math.max(max, child.size[1-this.axis]);
-            offset += child.size[this.axis];
         }
         if(this.fixedSize)
             max = this.size[1-this.axis];
@@ -203,8 +236,6 @@ export class TilingPanel extends ContainerPanel {
     }
 
     updateSize() {
-        if(this.fixedSize)
-            console.error('Tried to set size of fixed size TilingPanel');
         super.updateSize();
         this.recalculateLayout();
     }
@@ -215,7 +246,7 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
         super(position, size);
         this.fixedSize = true;
         this.strechChildren = true;
-        this.separatorSize = 4;
+        this.separatorSize = 3;
         this.relativeSizesOfChildren = [];
     }
 
@@ -262,7 +293,6 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
         this.relativeSizesOfChildren.push(relativeSize);
         if(this.children.length > 0) {
             const separator = new RectPanel(vec2.create(), vec2.create());
-            separator.node.classList.add('separator');
             separator.size[this.axis] = this.separatorSize;
             super.appendChild(separator);
             separator.registerPointerEvents((event) => {
@@ -309,9 +339,13 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
     }
 }
 
-export class TabsViewPanel extends ContainerPanel {
+export class TabsViewPanel extends TilingPanel {
     constructor(position, size) {
         super(position, size);
+        this.axis = 1;
+        this.fixedSize = true;
+        this.strechChildren = true;
+        this.lastChildCompensation = true;
         this.header = new ClippingViewPanel(vec2.create(), vec2.create());
         this.appendChild(this.header);
         this.body = new PanePanel(vec2.create(), vec2.create());
@@ -325,32 +359,15 @@ export class TabsViewPanel extends ContainerPanel {
     }
 
     recalculateLayout() {
-        this.header.size[0] = Math.max(0, this.size[0]-this.body.rectPanel.cornerRadius*2.0);
         this.header.size[1] = Math.min(this.tabsContainer.size[1], this.size[1]);
-        this.header.updateSize();
-        this.body.size[0] = this.size[0];
-        this.body.size[1] = Math.max(0, this.size[1]-this.tabsContainer.size[1]);
-        this.body.updateSize();
-        this.header.position[1] = -this.body.size[1]*0.5;
-        this.header.updatePosition();
-        this.body.position[1] = this.header.size[1]*0.5;
-        this.body.updatePosition();
-    }
-
-    updateSize() {
-        super.updateSize();
-        this.recalculateLayout();
+        super.recalculateLayout();
     }
 
     addTab() {
-        const tabHandleShape = new TabHandlePanel(vec2.create(), vec2.create()),
-              tabHandle = new AdaptiveSizeContainerPanel(vec2.create(), vec2.create());
-        tabHandle.padding = vec2.fromValues(8, 4);
-        tabHandle.background = true;
-        tabHandle.appendChild(tabHandleShape);
-        tabHandle.node.onclick = () => {
+        const tabHandle = new ButtonPanel(vec2.create(), () => {
             this.activeTab = tabHandle;
-        };
+        }, new TabHandlePanel(vec2.create(), vec2.create()));
+        tabHandle.padding = vec2.fromValues(11, 3);
         this.tabsContainer.appendChild(tabHandle);
         return tabHandle;
     }
@@ -368,13 +385,11 @@ export class TabsViewPanel extends ContainerPanel {
 
     set activeTab(tabHandle) {
         if(this._activeTab) {
-            this._activeTab.children[0].node.classList.add('tabHandle');
-            this._activeTab.children[0].node.classList.remove('activeTabHandle');
+            this._activeTab.children[0].node.classList.remove('active');
         }
         this._activeTab = tabHandle;
         if(this._activeTab) {
-            this._activeTab.children[0].node.classList.remove('tabHandle');
-            this._activeTab.children[0].node.classList.add('activeTabHandle');
+            this._activeTab.children[0].node.classList.add('active');
         }
     }
 }

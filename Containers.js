@@ -1,6 +1,6 @@
 import { vec2, mat3 } from './gl-matrix.js';
 import { Panel } from './Panel.js';
-import { LabelPanel, CirclePanel, RectPanel, SpeechBalloonPanel, TabHandlePanel } from './Atoms.js';
+import { LabelPanel, RectPanel, SpeechBalloonPanel, TabHandlePanel } from './Atoms.js';
 
 export class ContainerPanel extends Panel {
     constructor(position, size, node=Panel.createElement('g')) {
@@ -84,10 +84,14 @@ export class RootPanel extends ContainerPanel {
     constructor(parentNode, size) {
         super(vec2.create(), size, Panel.createElement('svg', parentNode));
         this.root = this;
-        this.content = new ContainerPanel(vec2.create());
+        this.content = new ContainerPanel(vec2.create(), vec2.create());
         this.appendChild(this.content);
-        this.overlays = new ContainerPanel(vec2.create());
+        this.overlays = new ContainerPanel(vec2.create(), vec2.create());
         this.appendChild(this.overlays);
+        this.overlayPane = Panel.createElement('rect', this.overlays.node);
+        this.overlayPane.setAttribute('width', '100%');
+        this.overlayPane.setAttribute('height', '100%');
+        this.overlayPane.style.visibility = 'hidden';
         this.defsNode = Panel.createElement('defs', this.node);
         const blurFilter = Panel.createElement('filter', this.defsNode);
         blurFilter.setAttribute('id', 'blurFilter');
@@ -116,6 +120,21 @@ export class RootPanel extends ContainerPanel {
     updateSize() {
         this.node.setAttribute('width', this.size[0]);
         this.node.setAttribute('height', this.size[1]);
+    }
+
+    openOverlay(overlay, close) {
+        this.root.overlayPane.style.visibility = '';
+        this.root.overlayPane.onclick = () => {
+            this.closeAllOverlays();
+            close();
+        };
+        this.root.overlays.appendChild(overlay);
+    }
+
+    closeAllOverlays() {
+        this.root.overlayPane.style.visibility = 'hidden';
+        for(const child of this.root.overlays.children)
+            this.root.overlays.removeChild(child);
     }
 }
 
@@ -149,15 +168,45 @@ export class AdaptiveSizeContainerPanel extends ContainerPanel {
 }
 
 export class ButtonPanel extends AdaptiveSizeContainerPanel {
-    constructor(position, onclick, backgroundPanel=new RectPanel(vec2.create(), vec2.create())) {
+    constructor(position, onclick, cssClass='button', backgroundPanel=new RectPanel(vec2.create(), vec2.create())) {
         super(position, vec2.create());
-        this.node.onclick = onclick;
         this.padding = vec2.fromValues(4, 2);
         this.background = true;
-        this.appendChild(backgroundPanel);
-        backgroundPanel.cornerRadius = 3;
-        if(backgroundPanel instanceof RectPanel)
-            backgroundPanel.node.classList.add('button');
+        this.node.onclick = onclick;
+        this.backgroundPanel = backgroundPanel;
+        if(cssClass)
+            this.backgroundPanel.node.classList.add(cssClass);
+        this.backgroundPanel.cornerRadius = 3;
+        this.appendChild(this.backgroundPanel);
+    }
+}
+
+export class CheckboxPanel extends ContainerPanel {
+    constructor(position) {
+        super(position, vec2.fromValues(12, 12));
+        this.node.classList.add('checkbox');
+        this.rectPanel = new RectPanel(vec2.fromValues(0, 1), this.size);
+        this.appendChild(this.rectPanel);
+        this.rectPanel.cornerRadius = 2;
+        this.rectPanel.node.onclick = () => {
+            this.checked = !this.checked;
+        };
+        this.labelPanel = new LabelPanel(vec2.create());
+        this.labelPanel.text = '✔';
+        this.appendChild(this.labelPanel);
+        this.rectPanel.updateSize();
+        this.rectPanel.updatePosition();
+    }
+
+    get checked() {
+        return this.node.classList.contains('active');
+    }
+
+    set checked(value) {
+        if(value)
+            this.node.classList.add('active');
+        else
+            this.node.classList.remove('active');
     }
 }
 
@@ -366,7 +415,7 @@ export class TabsViewPanel extends TilingPanel {
     addTab() {
         const tabHandle = new ButtonPanel(vec2.create(), () => {
             this.activeTab = tabHandle;
-        }, new TabHandlePanel(vec2.create(), vec2.create()));
+        }, undefined, new TabHandlePanel(vec2.create(), vec2.create()));
         tabHandle.padding = vec2.fromValues(11, 3);
         this.tabsContainer.appendChild(tabHandle);
         return tabHandle;

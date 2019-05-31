@@ -1,4 +1,4 @@
-import { vec2, mat3 } from './gl-matrix.js';
+import { vec2, mat2d } from './gl-matrix.js';
 
 export class Panel {
     static createElement(tag, parentNode) {
@@ -12,12 +12,21 @@ export class Panel {
         node.setAttributeNS('http://www.w3.org/1999/xlink', attribute, value);
     }
 
+    static animate(callback) {
+        let prevTimestamp = performance.now();
+        const animationFrame = (timestamp) => {
+            if(!callback(timestamp-prevTimestamp))
+                return;
+            prevTimestamp = timestamp;
+            window.requestAnimationFrame(animationFrame);
+        };
+        animationFrame(prevTimestamp);
+    }
+
     constructor(position, size, node) {
         this.position = position;
         this.size = size;
         this.node = node;
-        this.minPosition = vec2.create();
-        this.maxPosition = vec2.create();
         this._selected = false;
     }
 
@@ -27,23 +36,30 @@ export class Panel {
 
     updateSize() {}
 
-    recalculateLayout() {
-        vec2.scale(this.minPosition, this.size, 0.5);
-        vec2.add(this.maxPosition, this.position, this.minPosition);
-        vec2.sub(this.minPosition, this.position, this.minPosition);
+    recalculateLayout() {}
+
+    getBounds() {
+        const minPosition = vec2.create(),
+              maxPosition = vec2.create();
+        vec2.scale(minPosition, this.size, 0.5);
+        vec2.add(maxPosition, this.position, minPosition);
+        vec2.sub(minPosition, this.position, minPosition);
+        return [minPosition, maxPosition];
     }
 
     setBounds(positionA, positionB) {
-        vec2.min(this.minPosition, positionA, positionB);
-        vec2.max(this.maxPosition, positionA, positionB);
-        vec2.sub(this.size, this.maxPosition, this.minPosition);
-        vec2.add(this.position, this.minPosition, this.maxPosition);
+        const minPosition = vec2.create(),
+              maxPosition = vec2.create();
+        vec2.min(minPosition, positionA, positionB);
+        vec2.max(maxPosition, positionA, positionB);
+        vec2.sub(this.size, maxPosition, minPosition);
+        vec2.add(this.position, minPosition, maxPosition);
         vec2.scale(this.position, this.position, 0.5);
     }
 
     getRootMatrix() {
         const mat = this.root.node.getScreenCTM().inverse().multiply(this.node.getScreenCTM());
-        return mat3.fromValues(mat.a, mat.b, 0, mat.c, mat.d, 0, mat.e, mat.f, 0);
+        return mat2d.fromValues(mat.a, mat.b, mat.c, mat.d, mat.e, mat.f);
     }
 
     getRootPosition() {
@@ -88,7 +104,8 @@ export class Panel {
     }
 
     selectIfInside(min, max, toggle) {
-        if(min[0] > this.minPosition[0] || min[1] > this.minPosition[1] || max[0] < this.maxPosition[0] || max[1] < this.maxPosition[1])
+        const bounds = this.getBounds();
+        if(min[0] > bounds[0][0] || min[1] > bounds[0][1] || max[0] < bounds[1][0] || max[1] < bounds[1][1])
             return;
         if(toggle)
             this.selected = !this.selected;
@@ -96,8 +113,7 @@ export class Panel {
             this.selected = true;
     }
 
-    registerPointerEvents(pointerStart, referenceNode) {
-        let primaryTouchID, zoom;
+    registerPointerEvents(onPointerStart, onZoom, referenceNode) {
         function dualPointerDistance(event) {
             return (event.pointers.length == 2) ? vec2.distance(event.pointers[0].position, event.pointers[1].position) : 0;
         }
@@ -116,44 +132,44 @@ export class Panel {
             } else for(const pointer of event.pointers)
                 pointer.position = vec2.fromValues(pointer.clientX, pointer.clientY)
         }
-        if(this.zoom)
+        if(onZoom)
             this.node.onwheel = (event) => {
                 event.stopPropagation();
                 event.preventDefault();
                 refineEvent(event);
-                this.zoom(Math.pow(2, event.deltaY*0.1), event.pointers[0].position);
+                onZoom(Math.pow(2, event.deltaY*0.1), event.pointers[0].position);
             };
         this.node.onmousedown = this.node.ontouchstart = (event) => {
             event.stopPropagation();
-            event.preventDefault();
             if(this.root.node.ontouchstart)
                 return;
             refineEvent(event);
+            let primaryTouchID, zoomPointerDistance, moved = false;
             if(event.touches) {
                 primaryTouchID = event.touches[0].identifier;
-                zoom = dualPointerDistance(event);
-                zoom = (zoom < 300) ? 0 : zoom;
+                zoomPointerDistance = dualPointerDistance(event);
+                zoomPointerDistance = (zoomPointerDistance < 300) ? 0 : zoomPointerDistance;
             }
-            const [pointerMoving, pointerEnd] = pointerStart(event);
+            const [onPointerMoved, onPointerEnd] = onPointerStart(event);
             this.root.node.onmousemove = this.root.node.ontouchmove = (event) => {
                 event.stopPropagation();
                 event.preventDefault();
                 refineEvent(event);
-                if(zoom) {
+                if(zoomPointerDistance) {
                     const dist = dualPointerDistance(event);
-                    if(dist > 0 && this.zoom) {
+                    if(dist > 0 && onZoom) {
                         const center = vec2.create();
                         vec2.add(center, event.pointers[0].position, event.pointers[1].position);
                         vec2.scale(center, center, 0.5);
-                        this.zoom(dist/zoom, center);
-                        zoom = dist;
+                        onZoom(dist/zoomPointerDistance, center);
+                        zoomPointerDistance = dist;
                     }
-                } else if(pointerMoving)
-                    pointerMoving(event);
+                } else if(onPointerMoved)
+                    onPointerMoved(event, moved);
+                moved = true;
             };
             this.root.node.onmouseup = this.root.node.ontouchend = this.root.node.onmouseleave = this.root.node.ontouchleave = this.root.node.ontouchcancel = (event) => {
                 event.stopPropagation();
-                event.preventDefault();
                 if(event.touches && event.touches.length > 0 && primaryTouchID != event.changedTouches[0].identifier)
                     return;
                 refineEvent(event);
@@ -164,8 +180,8 @@ export class Panel {
                 this.root.node.onmouseleave = null;
                 this.root.node.ontouchleave = null;
                 this.root.node.ontouchcancel = null;
-                if(pointerEnd)
-                    pointerEnd(event);
+                if(onPointerEnd)
+                    onPointerEnd(event, moved);
             };
             if(event.type === 'touchstart') {
                 this.node.onmousedown = null;
@@ -174,5 +190,14 @@ export class Panel {
                 this.root.node.onmouseleave = null;
             }
         };
+    }
+
+    registerClickEvent(onClick) {
+        this.registerPointerEvents(() => {
+            return [undefined, (event, moved) => {
+                if(!moved)
+                    onClick();
+            }];
+        });
     }
 }

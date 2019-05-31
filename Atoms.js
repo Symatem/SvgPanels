@@ -12,7 +12,7 @@ export class LabelPanel extends Panel {
         const bbox = this.node.getBBox();
         this.size[0] = bbox.width;
         this.size[1] = bbox.height;
-        super.recalculateLayout();
+        this.updateSize();
     }
 
     get text() {
@@ -31,6 +31,7 @@ export class CirclePanel extends Panel {
     }
 
     updateSize() {
+        super.updateSize();
         this.node.setAttribute('r', Math.min(this.size[0], this.size[1]));
     }
 }
@@ -41,6 +42,7 @@ export class RectPanel extends Panel {
     }
 
     updateSize() {
+        super.updateSize();
         const width = Math.max(0, this.size[0]),
               height = Math.max(0, this.size[1]);
         this.node.setAttribute('x', -0.5*width);
@@ -67,6 +69,7 @@ export class SpeechBalloonPanel extends Panel {
     }
 
     updateSize() {
+        super.updateSize();
         const arrowSizeAbs = Math.abs(this.arrowSize),
               first = (Math.sqrt(2.0)-1.0)*4.0/3.0,
               second = 1.0-first;
@@ -111,6 +114,7 @@ export class TabHandlePanel extends Panel {
     }
 
     updateSize() {
+        super.updateSize();
         const first = (Math.sqrt(2.0)-1.0)*4.0/3.0,
               second = 1.0-first;
         let data = `M${this.margin-0.5*this.size[0]} ${0.5*this.size[1]}`
@@ -135,6 +139,7 @@ export class XhtmlPanel extends Panel {
     }
 
     updateSize() {
+        super.updateSize();
         this.node.setAttribute('x', -0.5*this.size[0]);
         this.node.setAttribute('y', -0.5*this.size[1]);
         this.node.setAttribute('width', this.size[0]);
@@ -177,6 +182,7 @@ export class ImagePanel extends Panel {
     }
 
     updateSize() {
+        super.updateSize();
         this.node.setAttribute('x', -0.5*this.size[0]);
         this.node.setAttribute('y', -0.5*this.size[1]);
         this.node.setAttribute('width', this.size[0]);

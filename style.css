@@ -16,7 +16,7 @@
     animation: fadeOut 0.25s ease-in-out forwards;
 }
 
-.disabled, .fadeOut {
+.disabled,.fadeOut {
     pointer-events: none;
 }
 
@@ -38,7 +38,6 @@ svg {
     -ms-user-select: none;
     -o-user-select: none;
     user-select: none;
-    cursor: crosshair;
 }
 
 rect {
@@ -55,9 +54,8 @@ foreignObject > body > * {
     margin: 0px;
 }
 
-input[type="text"] {
-    border-radius: 4px;
-    padding: 4px;
+textarea,input[type="text"] {
+    padding: 3px;
 }
 
 input[type="text"]:focus {
@@ -78,8 +76,17 @@ text,textarea,input[type="text"] {
 
 text {
     text-anchor: middle;
-    dominant-baseline: central; /* alignment-baseline */
+    dominant-baseline: central;
     pointer-events: none;
+}
+
+.checkbox > text {
+    opacity: 0;
+    dominant-baseline: middle;
+}
+
+.checkbox.active > text {
+    opacity: 1;
 }
 
 /* Colors */
@@ -88,20 +95,32 @@ svg {
     background: #1F1F1F;
 }
 
+.pane {
+    fill: #424242;
+}
+
+.speechBalloon {
+    fill: rgba(26, 26, 26, 0.937);
+}
+
+.selectionRect {
+    fill: rgba(200, 220, 255, 0.25);
+}
+
 ::selection {
     color: #FFFFFF;
     background: #333333;
 }
 
-input[type="text"] {
+textarea,input[type="text"] {
     background: #1F1F1F;
 }
 
-input[type="text"]:hover {
+textarea:hover,input[type="text"]:hover {
     background: #2D2D2D;
 }
 
-input[type="text"]:focus {
+textarea:focus,input[type="text"]:focus {
     background: #808080;
 }
 
@@ -110,17 +129,28 @@ text,textarea,input[type="text"] {
     color: #FFF;
 }
 
-.panePannel {
-    fill: #424242;
+rect.button {
+    fill: #585858;
 }
 
-.separator {
-
+rect.button:hover {
+    fill: #676767;
 }
 
-.speechBalloon {
-    stroke: #FFFFFF;
-    fill: #383838;
+rect.button:active {
+    fill: #5680C2;
+}
+
+.checkbox > rect {
+    fill: #666666;
+}
+
+.checkbox > rect:hover {
+    fill: #757575;
+}
+
+.checkbox.active > rect {
+    fill: #5379B4;
 }
 
 .tabHandle {
@@ -131,6 +161,6 @@ text,textarea,input[type="text"] {
     fill: #3A3A3A;
 }
 
-.tabHandle:active,.activeTabHandle {
+.tabHandle:active,.tabHandle.active {
     fill: #424242;
 }

@@ -1,6 +1,6 @@
 import { vec2, mat2d } from './gl-matrix.js';
 import { Panel } from './Panel.js';
-import { LabelPanel, RectPanel, SpeechBalloonPanel, TabHandlePanel } from './Atoms.js';
+import { LabelPanel, RectPanel, SpeechBalloonPanel, TabHandlePanel, TextFieldPanel } from './Atoms.js';
 
 export class ContainerPanel extends Panel {
     constructor(position, size, node=Panel.createElement('g')) {
@@ -14,8 +14,32 @@ export class ContainerPanel extends Panel {
 
     set root(root) {
         this._root = root;
+        if(this._backgroundPanel)
+            this._backgroundPanel.root = this.root;
         for(const child of this.children)
             child.root = root;
+    }
+
+    get backgroundPanel() {
+        return this._backgroundPanel;
+    }
+
+    set backgroundPanel(backgroundPanel) {
+        if(this._backgroundPanel)
+            this.node.removeChild(this._backgroundPanel.node);
+        this._backgroundPanel = backgroundPanel;
+        if(this._backgroundPanel) {
+            this.node.appendChild(this._backgroundPanel.node);
+            this._backgroundPanel.parent = this;
+            this._backgroundPanel.root = this.root;
+            this._backgroundPanel.size = this.size;
+        }
+    }
+
+    updateSize() {
+        super.updateSize();
+        if(this._backgroundPanel)
+            this._backgroundPanel.updateSize();
     }
 
     appendChild(child) {
@@ -138,8 +162,8 @@ export class RootPanel extends ContainerPanel {
 }
 
 export class AdaptiveSizeContainerPanel extends ContainerPanel {
-    constructor(position, size) {
-        super(position, size);
+    constructor(position) {
+        super(position, vec2.create());
         this.padding = vec2.create();
     }
 
@@ -147,7 +171,7 @@ export class AdaptiveSizeContainerPanel extends ContainerPanel {
         const minPosition = vec2.create(),
               maxPosition = vec2.create(),
               center = vec2.create();
-        for(let i = (this.background) ? 1 : 0; i < this.children.length; ++i) {
+        for(let i = 0; i < this.children.length; ++i) {
             const childBounds = this.children[i].getBounds();
             vec2.min(minPosition, minPosition, childBounds[0]);
             vec2.max(maxPosition, maxPosition, childBounds[1]);
@@ -158,41 +182,30 @@ export class AdaptiveSizeContainerPanel extends ContainerPanel {
         vec2.add(center, maxPosition, minPosition);
         if(vec2.dot(center, center) > 0.0) {
             vec2.scale(center, center, 0.5);
-            for(let i = (this.background) ? 1 : 0; i < this.children.length; ++i) {
+            for(let i = 0; i < this.children.length; ++i) {
                 vec2.sub(this.children[i].position, this.children[i].position, center);
                 this.children[i].updatePosition();
             }
         }
         this.updateSize();
     }
-
-    updateSize() {
-        super.updateSize();
-        if(this.background && this.children.length > 0) {
-            this.children[0].size = this.size;
-            this.children[0].updateSize();
-        }
-    }
 }
 
 export class ButtonPanel extends AdaptiveSizeContainerPanel {
     constructor(position, onClick, cssClass='button', backgroundPanel=new RectPanel(vec2.create(), vec2.create())) {
-        super(position, vec2.create());
+        super(position);
         this.padding = vec2.fromValues(4, 2);
-        this.background = true;
-        this.registerClickEvent(() => {
-            onClick();
-        });
+        if(onClick)
+            this.registerClickEvent(onClick);
         this.backgroundPanel = backgroundPanel;
         if(cssClass)
             this.backgroundPanel.node.classList.add(cssClass);
-        this.backgroundPanel.cornerRadius = 3;
-        this.appendChild(this.backgroundPanel);
+        this.backgroundPanel.cornerRadius = 4;
     }
 }
 
 export class CheckboxPanel extends ContainerPanel {
-    constructor(position) {
+    constructor(position, onChange) {
         super(position, vec2.fromValues(12, 12));
         this.node.classList.add('checkbox');
         this.rectPanel = new RectPanel(vec2.create(), this.size);
@@ -200,6 +213,8 @@ export class CheckboxPanel extends ContainerPanel {
         this.rectPanel.cornerRadius = 2;
         this.registerClickEvent(() => {
             this.checked = !this.checked;
+            if(onChange)
+                onChange();
         });
         this.labelPanel = new LabelPanel(vec2.create());
         this.labelPanel.text = '✔';
@@ -229,23 +244,17 @@ export class ClippingViewPanel extends ContainerPanel {
         this.clipNode.setAttribute('id', 'clipPath'+clipPathID);
         this.useNode = Panel.createElement('use', this.clipNode);
         Panel.setAttribute(this.useNode, 'href', '#clipRect'+clipPathID);
-        this.rectPanel = new RectPanel(vec2.create(), this.size);
-        this.rectPanel.node.setAttribute('id', 'clipRect'+clipPathID);
-        super.appendChild(this.rectPanel);
+        this.backgroundPanel = new RectPanel(vec2.create(), this.size);
+        this.backgroundPanel.node.setAttribute('id', 'clipRect'+clipPathID);
         ++clipPathID;
-    }
-
-    updateSize() {
-        super.updateSize();
-        this.rectPanel.updateSize();
     }
 }
 
 export class PanePanel extends ClippingViewPanel {
     constructor(position, size) {
         super(position, size);
-        this.rectPanel.node.classList.add('pane');
-        this.rectPanel.cornerRadius = 5;
+        this.backgroundPanel.node.classList.add('pane');
+        this.backgroundPanel.cornerRadius = 5;
     }
 }
 
@@ -253,42 +262,48 @@ export class TilingPanel extends ContainerPanel {
     constructor(position, size) {
         super(position, size);
         this.axis = 0;
-        this.fixedSize = false;
-        this.strechChildren = false;
-        this.lastChildCompensation = false;
-        this.alignment = 0;
+        this.sizeAlongAxis = 'adaptive'; // adaptive, strechFirstChild, strechLastChild, alignFront, alignCenter, alignBack
+        this.sizeOtherAxis = 'adaptive'; // adaptive, strechChildren, fixed
+        this.alignOtherAxis = 0;
         this.padding = vec2.create();
     }
 
     recalculateLayout() {
-        let max = 0, offset = 0;
+        let offset, max = 0, totalSize = 0;
         for(let i = 0; i < this.children.length; ++i) {
             const child = this.children[i];
-            if(this.lastChildCompensation && i == this.children.length-1) {
-                child.size[this.axis] = Math.max(0, this.size[this.axis]-offset);
-                child.updateSize();
-                offset = this.size[this.axis];
-            } else
-                offset += child.size[this.axis];
+            totalSize += child.size[this.axis];
             max = Math.max(max, child.size[1-this.axis]);
         }
-        if(this.fixedSize)
+        if(this.sizeOtherAxis != 'adaptive')
             max = this.size[1-this.axis];
-        const totalSize = offset;
-        offset *= -0.5;
+        if(this.sizeAlongAxis == 'strechFirstChild' || this.sizeAlongAxis == 'strechLastChild') {
+            const child = this.children[(this.sizeAlongAxis == 'strechFirstChild') ? 0 : this.children.length-1];
+            child.size[this.axis] = Math.max(0, this.size[this.axis]-totalSize+child.size[this.axis]);
+            child.updateSize();
+            totalSize = this.size[this.axis];
+        }
+        if(this.sizeAlongAxis == 'alignFront')
+            offset = -this.size[this.axis]*0.5;
+        else if(this.sizeAlongAxis == 'alignBack')
+            offset = this.size[this.axis]*0.5-totalSize;
+        else
+            offset = -0.5*totalSize;
         for(const child of this.children) {
-            child.position[1-this.axis] = (max-child.size[1-this.axis])*this.alignment;
+            child.position[1-this.axis] = (max-child.size[1-this.axis])*this.alignOtherAxis;
             child.position[this.axis] = offset+child.size[this.axis]*0.5;
             child.updatePosition();
-            if(this.strechChildren && child.size[1-this.axis] != max) {
+            if(this.sizeOtherAxis == 'strechChildren' && child.size[1-this.axis] != max) {
                 child.size[1-this.axis] = max;
                 child.updateSize();
             }
             offset += child.size[this.axis];
         }
-        if(!this.fixedSize) {
+        if(this.sizeAlongAxis == 'adaptive')
             this.size[this.axis] = totalSize;
+        if(this.sizeOtherAxis == 'adaptive')
             this.size[1-this.axis] = max;
+        if(this.sizeAlongAxis == 'adaptive' || this.sizeOtherAxis == 'adaptive') {
             vec2.scaleAndAdd(this.size, this.size, this.padding, 2.0);
             super.updateSize();
         }
@@ -303,8 +318,8 @@ export class TilingPanel extends ContainerPanel {
 export class ConfigurableSplitViewPanel extends TilingPanel {
     constructor(position, size) {
         super(position, size);
-        this.fixedSize = true;
-        this.strechChildren = true;
+        this.sizeAlongAxis = 'adaptive';
+        this.sizeOtherAxis = 'strechChildren';
         this.separatorSize = 3;
         this.relativeSizesOfChildren = [];
     }
@@ -398,19 +413,59 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
     }
 }
 
+export class RadioButtonsPanel extends TilingPanel {
+    constructor(position, size, onChange) {
+        super(position, size);
+        this.onChange = onChange;
+    }
+
+    appendChild(child) {
+        child.registerClickEvent(() => {
+            this.activeButton = child;
+            if(this.onChange)
+                this.onChange();
+        });
+        return super.appendChild(child);
+    }
+
+    removeChild(child) {
+        if(child == this._activeButton) {
+            this.activeButton = undefined;
+            if(this.onChange)
+                this.onChange();
+        }
+        return super.removeChild(child);
+    }
+
+    get activeButton() {
+        return this._activeButton;
+    }
+
+    set activeButton(button) {
+        if(this._activeButton)
+            this._activeButton.backgroundPanel.node.classList.remove('active');
+        this._activeButton = button;
+        if(this._activeButton)
+            this._activeButton.backgroundPanel.node.classList.add('active');
+    }
+}
+
 export class TabsViewPanel extends TilingPanel {
     constructor(position, size, body=new PanePanel(vec2.create(), vec2.create())) {
         super(position, size);
         this.axis = 1;
-        this.fixedSize = true;
-        this.strechChildren = true;
-        this.lastChildCompensation = true;
+        this.sizeAlongAxis = 'strechLastChild';
+        this.sizeOtherAxis = 'strechChildren';
         this.header = new ClippingViewPanel(vec2.create(), vec2.create());
         super.appendChild(this.header);
-        this.header.rectPanel.registerClickEvent(() => {
-            this.activeTab = undefined;
+        this.header.backgroundPanel.registerClickEvent(() => {
+            if(!this.tabsContainer.activeButton)
+                return;
+            this.tabsContainer.activeButton = undefined;
+            if(this.tabsContainer.onChange)
+                this.tabsContainer.onChange();
         });
-        this.tabsContainer = new TilingPanel(vec2.create(), vec2.create());
+        this.tabsContainer = new RadioButtonsPanel(vec2.create(), vec2.create());
         this.header.appendChild(this.tabsContainer);
         this.tabsContainer.axis = 0;
         this.body = body;
@@ -423,9 +478,7 @@ export class TabsViewPanel extends TilingPanel {
     }
 
     addTab() {
-        const tabHandle = new ButtonPanel(vec2.create(), () => {
-            this.activeTab = tabHandle;
-        }, undefined, new TabHandlePanel(vec2.create(), vec2.create()));
+        const tabHandle = new ButtonPanel(vec2.create(), undefined, undefined, new TabHandlePanel(vec2.create(), vec2.create()));
         tabHandle.padding = vec2.fromValues(11, 3);
         this.tabsContainer.appendChild(tabHandle);
         return tabHandle;
@@ -436,21 +489,5 @@ export class TabsViewPanel extends TilingPanel {
             return false;
         this.tabsContainer.recalculateLayout();
         return true;
-    }
-
-    get activeTab() {
-        return this._activeTab;
-    }
-
-    set activeTab(tabHandle) {
-        if(this._activeTab) {
-            this._activeTab.children[0].node.classList.remove('active');
-        }
-        this._activeTab = tabHandle;
-        if(this._activeTab) {
-            this._activeTab.children[0].node.classList.add('active');
-        }
-        if(this.onChange)
-            this.onChange();
     }
 }

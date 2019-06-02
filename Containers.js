@@ -63,6 +63,18 @@ export class ContainerPanel extends Panel {
         return true;
     }
 
+    reorderChild(child, newIndex) {
+        const index = this.children.indexOf(child);
+        if(!child || child.parent != this || index == -1 || index == newIndex || newIndex < 0 || newIndex >= this.children.length)
+            return false;
+        this.children.splice(newIndex, 0, this.children.splice(index, 1)[0]);
+        if(newIndex == this.node.childNodes.length-1)
+            this.node.appendChild(child.node);
+        else
+            this.node.insertBefore(child.node, this.node.childNodes[(newIndex == index+1) ? newIndex+1 : newIndex]);
+        return true;
+    }
+
     appendChildAnimated(child) {
         if(!this.appendChild(child))
             return false;
@@ -104,6 +116,8 @@ export class RootPanel extends ContainerPanel {
     constructor(parentNode, size) {
         super(vec2.create(), size, Panel.createElement('svg', parentNode));
         this.root = this;
+        this.node.setAttribute('width', '100%');
+        this.node.setAttribute('height', '100%');
         this.content = new ContainerPanel(vec2.create(), vec2.create());
         this.appendChild(this.content);
         this.overlays = new ContainerPanel(vec2.create(), vec2.create());
@@ -132,10 +146,14 @@ export class RootPanel extends ContainerPanel {
         const feMerge = Panel.createElement('feMerge', blurFilter);
         Panel.createElement('feMergeNode', feMerge).setAttribute('in', 'brighter');
         Panel.createElement('feMergeNode', feMerge).setAttribute('in', 'SourceGraphic');
-        this.updateSize();
     }
 
-    recalculateLayout() {}
+    recalculateLayout() {
+        this.size[0] = this.node.clientWidth;
+        this.size[1] = this.node.clientHeight;
+        vec2.scale(this.content.position, this.size, 0.5);
+        this.content.updatePosition();
+    }
 
     updateSize() {
         this.node.setAttribute('width', this.size[0]);
@@ -262,9 +280,9 @@ export class TilingPanel extends ContainerPanel {
     constructor(position, size) {
         super(position, size);
         this.axis = 0;
-        this.sizeAlongAxis = 'adaptive'; // adaptive, strechFirstChild, strechLastChild, alignFront, alignCenter, alignBack
-        this.sizeOtherAxis = 'adaptive'; // adaptive, strechChildren, fixed
-        this.alignOtherAxis = 0;
+        this.sizeAlongAxis = 'sumOfChildren'; // sumOfChildren, alignFront, alignCenter, alignBack, number (index of child to be stretched, negative counts from end)
+        this.otherAxisSizeStays = false;
+        this.otherAxisAlignment = 0.0; // -0.5, 0.0, 0.5, stretch
         this.padding = vec2.create();
     }
 
@@ -275,10 +293,10 @@ export class TilingPanel extends ContainerPanel {
             totalSize += child.size[this.axis];
             max = Math.max(max, child.size[1-this.axis]);
         }
-        if(this.sizeOtherAxis != 'adaptive')
+        if(this.otherAxisSizeStays)
             max = this.size[1-this.axis];
-        if(this.sizeAlongAxis == 'strechFirstChild' || this.sizeAlongAxis == 'strechLastChild') {
-            const child = this.children[(this.sizeAlongAxis == 'strechFirstChild') ? 0 : this.children.length-1];
+        if(typeof this.sizeAlongAxis == 'number') {
+            const child = this.children[(this.sizeAlongAxis < 0) ? this.children.length+this.sizeAlongAxis : this.sizeAlongAxis];
             child.size[this.axis] = Math.max(0, this.size[this.axis]-totalSize+child.size[this.axis]);
             child.updateSize();
             totalSize = this.size[this.axis];
@@ -290,20 +308,20 @@ export class TilingPanel extends ContainerPanel {
         else
             offset = -0.5*totalSize;
         for(const child of this.children) {
-            child.position[1-this.axis] = (max-child.size[1-this.axis])*this.alignOtherAxis;
+            child.position[1-this.axis] = (this.otherAxisAlignment == 'stretch') ? 0 : (max-child.size[1-this.axis])*this.otherAxisAlignment;
             child.position[this.axis] = offset+child.size[this.axis]*0.5;
             child.updatePosition();
-            if(this.sizeOtherAxis == 'strechChildren' && child.size[1-this.axis] != max) {
+            if(this.otherAxisAlignment == 'stretch' && child.size[1-this.axis] != max) {
                 child.size[1-this.axis] = max;
                 child.updateSize();
             }
             offset += child.size[this.axis];
         }
-        if(this.sizeAlongAxis == 'adaptive')
+        if(this.sizeAlongAxis == 'sumOfChildren')
             this.size[this.axis] = totalSize;
-        if(this.sizeOtherAxis == 'adaptive')
+        if(!this.otherAxisSizeStays)
             this.size[1-this.axis] = max;
-        if(this.sizeAlongAxis == 'adaptive' || this.sizeOtherAxis == 'adaptive') {
+        if(this.sizeAlongAxis == 'sumOfChildren' || !this.otherAxisSizeStays) {
             vec2.scaleAndAdd(this.size, this.size, this.padding, 2.0);
             super.updateSize();
         }
@@ -318,8 +336,9 @@ export class TilingPanel extends ContainerPanel {
 export class ConfigurableSplitViewPanel extends TilingPanel {
     constructor(position, size) {
         super(position, size);
-        this.sizeAlongAxis = 'adaptive';
-        this.sizeOtherAxis = 'strechChildren';
+        this.sizeAlongAxis = 'sumOfChildren';
+        this.otherAxisSizeStays = true;
+        this.otherAxisAlignment = 'stretch';
         this.separatorSize = 3;
         this.relativeSizesOfChildren = [];
     }
@@ -454,8 +473,9 @@ export class TabsViewPanel extends TilingPanel {
     constructor(position, size, body=new PanePanel(vec2.create(), vec2.create())) {
         super(position, size);
         this.axis = 1;
-        this.sizeAlongAxis = 'strechLastChild';
-        this.sizeOtherAxis = 'strechChildren';
+        this.sizeAlongAxis = -1;
+        this.otherAxisSizeStays = true;
+        this.otherAxisAlignment = 'stretch';
         this.header = new ClippingViewPanel(vec2.create(), vec2.create());
         super.appendChild(this.header);
         this.header.backgroundPanel.registerClickEvent(() => {

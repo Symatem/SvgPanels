@@ -511,3 +511,93 @@ export class TabsViewPanel extends TilingPanel {
         return true;
     }
 }
+
+export class InfiniteViewPanel extends ClippingViewPanel {
+    constructor(position, size) {
+        super(position, size);
+        this.content = new AdaptiveSizeContainerPanel(vec2.create());
+        this.appendChild(this.content);
+        this.contentTransform = mat2d.create();
+        this.inverseContentTransform = mat2d.create();
+        this.velocity = vec2.create();
+        this.damping = 0.9;
+        this.enableSelectionRect = false;
+        this.minScale = 1.0;
+        this.maxScale = 1.0;
+        this.registerPointerEvents((event) => {
+            if(event.modifierKey && this.enableSelectionRect) {
+                const dragOrigin = event.pointers[0].position;
+                return [(event, moved) => {
+                    if(!this.selectionRect) {
+                        this.selectionRect = new RectPanel(vec2.create(), vec2.create());
+                        this.appendChildAnimated(this.selectionRect);
+                        this.selectionRect.node.classList.add('selectionRect');
+                    }
+                    this.selectionRect.setBounds(dragOrigin, event.pointers[0].position);
+                    this.selectionRect.updatePosition();
+                    this.selectionRect.updateSize();
+                }, (event, moved) => {
+                    if(!moved)
+                        return;
+                    const bounds = this.selectionRect.getBounds();
+                    vec2.transformMat2d(bounds[0], bounds[0], this.inverseContentTransform);
+                    vec2.transformMat2d(bounds[1], bounds[1], this.inverseContentTransform);
+                    this.content.selectChildrenInside(bounds[0], bounds[1], event.modifierKey);
+                    this.removeChildAnimated(this.selectionRect);
+                    delete this.selectionRect;
+                }];
+            } else {
+                const dragOrigin = event.pointers[0].position,
+                      originalTranslation = this.contentTranslation;
+                let translation = vec2.clone(originalTranslation),
+                    prevTranslation = translation,
+                    prevTimestamp = performance.now();
+                return [(event, moved) => {
+                    if(!moved)
+                        this.startedMoving();
+                    vec2.sub(translation, event.pointers[0].position, dragOrigin);
+                    vec2.add(translation, translation, originalTranslation);
+                    this.setContentTransformation(translation, this.contentScale);
+                    translation = this.contentTranslation;
+                    const timestamp = performance.now();
+                    vec2.sub(this.velocity, translation, prevTranslation);
+                    vec2.scale(this.velocity, this.velocity, 1.0/(timestamp-prevTimestamp));
+                    vec2.copy(prevTranslation, translation);
+                    prevTimestamp = timestamp;
+                }, (event, moved) => {
+                    if(moved)
+                        this.stoppedMoving();
+                    else
+                        this.setAllChildrenSelected(false);
+                }];
+            }
+        }, (factor, position) => {
+            let scale = this.contentScale;
+            factor = Math.min(Math.max(factor*scale, this.minScale), this.maxScale)/scale;
+            if(factor == 1.0)
+                return;
+            scale *= factor;
+            const translation = this.contentTranslation;
+            vec2.sub(translation, translation, position);
+            vec2.scale(translation, translation, factor);
+            vec2.add(translation, translation, position);
+            this.setContentTransformation(translation, scale);
+        }, this.backgroundPanel.node);
+    }
+
+    startedMoving() {}
+    stoppedMoving() {}
+
+    get contentTranslation() {
+        return vec2.fromValues(this.contentTransform[4], this.contentTransform[5]);
+    }
+
+    get contentScale() {
+        return this.contentTransform[0];
+    }
+
+    setContentTransformation(translation, scale) {
+        mat2d.set(this.contentTransform, scale, 0.0, 0.0, scale, translation[0], translation[1]);
+        mat2d.invert(this.inverseContentTransform, this.contentTransform);
+        this.content.node.setAttribute('transform', 'translate('+translation[0]+', '+translation[1]+') scale('+scale+')');
+    }

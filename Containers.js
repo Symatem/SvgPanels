@@ -601,3 +601,70 @@ export class InfiniteViewPanel extends ClippingViewPanel {
         mat2d.invert(this.inverseContentTransform, this.contentTransform);
         this.content.node.setAttribute('transform', 'translate('+translation[0]+', '+translation[1]+') scale('+scale+')');
     }
+}
+
+export class ScrollViewPanel extends InfiniteViewPanel {
+    constructor(position, size) {
+        super(position, size);
+        this.scrollBarWidth = 5;
+        this.scrollBars = [];
+        for(let i = 0; i < 2; ++i) {
+            const scrollBar = new RectPanel(vec2.create(), vec2.create());
+            this.scrollBars.push(scrollBar);
+            scrollBar.showIf = 'overflow'; // always, overflow, moving, never
+            scrollBar.node.classList.add('scrollBar');
+            scrollBar.registerPointerEvents((event) => {
+                const dragOrigin = event.pointers[0].position,
+                      originalPosition = scrollBar.position[i],
+                      translation = this.contentTranslation;
+                return [(event, moved) => {
+                    const position = originalPosition+event.pointers[0].position[i]-dragOrigin[i];
+                    translation[i] = 0.5*this.scrollBarWidth-position/scrollBar.maxLength*this.content.size[i]*this.contentScale;
+                    this.setContentTransformation(translation, this.contentScale);
+                }];
+            });
+        }
+    }
+
+    startedMoving() {
+        for(let i = 0; i < 2; ++i)
+            if(this.scrollBars[i].showIf == 'moving' && this.scrollBars[i].size[i] < this.scrollBars[i].maxLength)
+                this.appendChildAnimated(this.scrollBars[i]);
+    }
+
+    stoppedMoving() {
+        for(let i = 0; i < 2; ++i)
+            if(this.scrollBars[i].showIf == 'moving')
+                this.removeChildAnimated(this.scrollBars[i]);
+    }
+
+    setContentTransformation(translation, scale) {
+        for(let i = 0; i < 2; ++i) {
+            const contentSize = this.content.size[i]*scale,
+                  maxTranslation = Math.max(0.0, 0.5*(contentSize-this.size[i]));
+            translation[i] = Math.max(-maxTranslation, Math.min(translation[i], maxTranslation));
+            this.scrollBars[i].maxLength = this.size[i]-this.scrollBarWidth*2.0;
+            this.scrollBars[i].position[i] = -0.5*this.scrollBarWidth-this.scrollBars[i].maxLength*translation[i]/contentSize;
+            this.scrollBars[i].position[1-i] = 0.5*this.size[1-i]-this.scrollBarWidth;
+            this.scrollBars[i].updatePosition();
+            this.scrollBars[i].cornerRadius = this.scrollBarWidth*0.5;
+            this.scrollBars[i].size[i] = this.scrollBars[i].maxLength*Math.min(1.0, this.size[i]/contentSize);
+            this.scrollBars[i].size[1-i] = this.scrollBarWidth;
+            this.scrollBars[i].updateSize();
+            if(this.scrollBars[i].showIf == 'always' || (this.scrollBars[i].showIf == 'overflow' && this.scrollBars[i].size[i] < this.scrollBars[i].maxLength))
+                this.appendChildAnimated(this.scrollBars[i]);
+            else if(this.scrollBars[i].showIf != 'moving')
+                this.removeChildAnimated(this.scrollBars[i]);
+        }
+        super.setContentTransformation(translation, scale);
+    }
+
+    recalculateLayout() {
+        this.setContentTransformation(this.contentTranslation, this.contentScale);
+    }
+
+    updateSize() {
+        super.updateSize();
+        this.recalculateLayout();
+    }
+}

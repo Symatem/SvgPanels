@@ -668,3 +668,61 @@ export class ScrollViewPanel extends InfiniteViewPanel {
         this.recalculateLayout();
     }
 }
+
+export class SliderPanel extends ContainerPanel {
+    constructor(position, size, onChange) {
+        super(position, size);
+        this.backgroundPanel = new RectPanel(vec2.create(), size);
+        this.barPanel = new RectPanel(vec2.create(), vec2.create());
+        this.appendChild(this.barPanel);
+        this.barPanel.node.classList.add('sliderBar');
+        this.labelPanel = new LabelPanel(vec2.create());
+        this.appendChild(this.labelPanel);
+        this.textFieldPanel = new TextFieldPanel(vec2.create(), size);
+        this.textFieldPanel.embeddedNode.onchange = this.textFieldPanel.embeddedNode.onblur = () => {
+            this.value = parseFloat(this.textFieldPanel.text);
+            this.removeChild(this.textFieldPanel);
+            this.recalculateLayout();
+            if(onChange)
+                onChange();
+        };
+        this.minValue = 0.0;
+        this.maxValue = 1.0;
+        this.value = 0.5;
+        this.fixedPointDigits = 2;
+        this.node.classList.add('slider');
+        this.registerPointerEvents((event) => {
+            const dragOrigin = event.pointers[0].position[0],
+                  originalValue = this.value;
+            return [(event, moved) => {
+                this.value = originalValue+(event.pointers[0].position[0]-dragOrigin)*(this.maxValue-this.minValue)/this.size[0];
+                this.recalculateLayout();
+            }, (event, moved) => {
+                if(moved) {
+                    if(onChange)
+                        onChange();
+                    return;
+                }
+                this.appendChild(this.textFieldPanel);
+                this.textFieldPanel.text = this.labelPanel.text;
+                this.textFieldPanel.embeddedNode.focus();
+            }];
+        });
+    }
+
+    recalculateLayout() {
+        this.value = Math.max(this.minValue, Math.min(this.value, this.maxValue));
+        this.barPanel.size[0] = (this.value-this.minValue)/(this.maxValue-this.minValue)*this.size[0];
+        this.barPanel.size[1] = this.size[1];
+        this.barPanel.updateSize();
+        this.barPanel.position[0] = 0.5*(this.barPanel.size[0]-this.size[0]);
+        this.barPanel.updatePosition();
+        this.labelPanel.text = this.value.toFixed(this.fixedPointDigits);
+    }
+
+    updateSize() {
+        super.updateSize();
+        this.textFieldPanel.updateSize();
+        this.recalculateLayout();
+    }
+}

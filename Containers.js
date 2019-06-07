@@ -222,6 +222,43 @@ export class ButtonPanel extends AdaptiveSizeContainerPanel {
     }
 }
 
+export class PopupMenuPanel extends ButtonPanel {
+    constructor(position, onOpen, cssClass='popupMenuButton') {
+        super(position, () => {
+            this.root.openOverlay(this.overlayPanel, () => {
+                this.backgroundPanel.node.classList.remove('active');
+            });
+            this.backgroundPanel.node.classList.add('active');
+            onOpen();
+            this.overlayPanel.recalculateLayout();
+            this.updateOverlayPosition();
+        }, cssClass);
+        if(cssClass == 'toolbarMenuButton')
+            this.backgroundPanel.cornerRadius = 0;
+        this.overlayPanel = new AdaptiveSizeContainerPanel(vec2.create());
+        this.overlayPanel.padding = vec2.fromValues(4, 2);
+        this.overlayPanel.backgroundPanel = new SpeechBalloonPanel(vec2.create(), vec2.create());
+        this.overlayPanel.backgroundPanel.node.classList.add('popupOverlay');
+        if(cssClass == 'toolbarMenuButton') {
+            this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 0;
+            this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 0;
+        }
+    }
+
+    updateOverlayPosition() {
+        const bounds = this.node.getBoundingClientRect();
+        this.overlayPanel.position = this.getRootPosition();
+        this.overlayPanel.position[0] += (this.overlayPanel.size[0]-bounds.width)*0.5;
+        this.overlayPanel.position[1] += (bounds.height+this.overlayPanel.size[1])*0.5;
+        this.overlayPanel.updatePosition();
+    }
+
+    updatePosition() {
+        super.updatePosition();
+        this.updateOverlayPosition();
+    }
+}
+
 export class CheckboxPanel extends ContainerPanel {
     constructor(position, onChange) {
         super(position, vec2.fromValues(12, 12));

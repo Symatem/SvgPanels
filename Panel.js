@@ -28,6 +28,7 @@ export class Panel {
         this.size = size;
         this.node = node;
         this._selected = false;
+        node.panel = this;
     }
 
     updatePosition() {
@@ -65,6 +66,15 @@ export class Panel {
     getRootPosition() {
         const rootCTM = this.root.node.getScreenCTM(), nodeCTM = this.node.getScreenCTM();
         return vec2.fromValues(nodeCTM.e-rootCTM.e, nodeCTM.f-rootCTM.f);
+    }
+
+    getNthParent(n) {
+        let panel = this;
+        while(panel && n > 0) {
+            panel = panel.parent;
+            --n;
+        }
+        return panel;
     }
 
     get root() {

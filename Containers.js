@@ -161,19 +161,19 @@ export class RootPanel extends ContainerPanel {
         this.node.setAttribute('height', this.size[1]);
     }
 
-    openOverlay(overlay, onClose) {
+    openModalOverlay(overlay, onClose) {
         this.root.overlayPane.style.visibility = '';
         this.root.overlayPane.onclick = (event) => {
             event.stopPropagation();
             event.preventDefault();
-            this.closeAllOverlays();
+            this.closeModalOverlay();
             if(onClose)
                 onClose();
         };
         this.root.overlays.appendChild(overlay);
     }
 
-    closeAllOverlays() {
+    closeModalOverlay() {
         this.root.overlayPane.style.visibility = 'hidden';
         for(const child of this.root.overlays.children)
             this.root.overlays.removeChild(child);
@@ -226,7 +226,7 @@ export class ButtonPanel extends AdaptiveSizeContainerPanel {
 export class PopupMenuPanel extends ButtonPanel {
     constructor(position, onOpen, cssClass='popupMenuButton') {
         super(position, () => {
-            this.root.openOverlay(this.overlayPanel, () => {
+            this.root.openModalOverlay(this.overlayPanel, () => {
                 this.backgroundPanel.node.classList.remove('active');
             });
             this.backgroundPanel.node.classList.add('active');
@@ -550,6 +550,7 @@ export class TabsViewPanel extends TilingPanel {
         this.sizeAlongAxis = -1;
         this.otherAxisSizeStays = true;
         this.otherAxisAlignment = 'stretch';
+        this.enableTabDragging = false;
         this.header = new ClippingViewPanel(vec2.create(), vec2.create());
         super.appendChild(this.header);
         this.header.backgroundPanel.registerClickEvent(() => {
@@ -583,6 +584,46 @@ export class TabsViewPanel extends TilingPanel {
         const tabHandle = new ButtonPanel(vec2.create(), undefined, undefined, new TabHandlePanel(vec2.create(), vec2.create()));
         this.tabsContainer.appendChild(tabHandle);
         tabHandle.padding = vec2.fromValues(11, 3);
+        tabHandle.registerPointerEvents((event) => {
+            const position = tabHandle.getRootPosition();
+            vec2.sub(position, position, event.pointers[0].position);
+            return [(event, moved) => {
+                if(!this.enableTabDragging)
+                    return;
+                if(!moved) {
+                    tabHandle.node.classList.add('disabled');
+                    this.tabsContainer.removeChild(tabHandle);
+                    this.root.overlays.appendChild(tabHandle);
+                }
+                vec2.add(tabHandle.position, position, event.pointers[0].position);
+                tabHandle.updatePosition();
+            }, (event, moved) => {
+                let tabsViewPanel = this;
+                if(this.enableTabDragging && moved) {
+                    const node = document.elementFromPoint(event.clientX, event.clientY),
+                          position = this.tabsContainer.getRootPosition();
+                    vec2.sub(position, tabHandle.position, position);
+                    this.root.overlays.removeChild(tabHandle);
+                    tabsViewPanel = (node) ? node.panel : undefined;
+                    tabsViewPanel = tabsViewPanel.getNthParent(2);
+                    tabsViewPanel = (tabsViewPanel.getNthParent(2) instanceof TabsViewPanel) ? tabsViewPanel.getNthParent(2) : tabsViewPanel;
+                    if(!(tabsViewPanel instanceof TabsViewPanel) || !tabsViewPanel.enableTabDragging)
+                        return;
+                    let index = 0;
+                    while(index < tabsViewPanel.tabsContainer.children.length && tabsViewPanel.tabsContainer.children[index].position[0] < position[0])
+                        ++index;
+                    tabHandle.node.classList.remove('disabled');
+                    tabsViewPanel.tabsContainer.appendChild(tabHandle);
+                    tabsViewPanel.tabsContainer.reorderChild(tabHandle, index);
+                    tabsViewPanel.tabsContainer.recalculateLayout();
+                }
+                if(!tabsViewPanel)
+                    return;
+                tabsViewPanel.tabsContainer.activeButton = tabHandle;
+                if(tabsViewPanel.tabsContainer.onChange)
+                    tabsViewPanel.tabsContainer.onChange();
+            }];
+        });
         return tabHandle;
     }
 

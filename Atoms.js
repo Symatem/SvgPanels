@@ -62,7 +62,6 @@ export class RectPanel extends Panel {
 export class SpeechBalloonPanel extends Panel {
     constructor(position, size) {
         super(position, size, Panel.createElement('path'));
-        this.node.classList.add('speechBalloon');
         this.cornerRadiusTopLeft = 4;
         this.cornerRadiusTopRight = 4;
         this.cornerRadiusBottomLeft = 4;
@@ -105,29 +104,6 @@ export class SpeechBalloonPanel extends Panel {
             data += `v${length+this.arrowOrigin[1]+this.cornerRadiusBottomLeft}l${-this.arrowSize} ${-arrowSizeAbs}l${this.arrowSize} ${-arrowSizeAbs}z`;
         } else
             data += 'z'; // `v${this.cornerRadiusBottomLeft+this.cornerRadiusTopLeft-this.size[1]}`;
-        this.node.setAttribute('d', data);
-    }
-}
-
-export class TabHandlePanel extends Panel {
-    constructor(position, size) {
-        super(position, size, Panel.createElement('path'));
-        this.node.classList.add('tabHandle');
-        this.margin = 2;
-    }
-
-    updateSize() {
-        super.updateSize();
-        const first = (Math.sqrt(2.0)-1.0)*4.0/3.0,
-              second = 1.0-first;
-        let data = `M${this.margin-0.5*this.size[0]} ${0.5*this.size[1]}`
-        data += `v${this.cornerRadius-this.size[1]}`;
-        if(this.cornerRadius > 0)
-            data += `c0 ${-this.cornerRadius*first} ${this.cornerRadius*second} ${-this.cornerRadius} ${this.cornerRadius} ${-this.cornerRadius}`;
-        data += `h${this.size[0]-2*(this.margin+this.cornerRadius)}`;
-        if(this.cornerRadius > 0)
-            data += `c${this.cornerRadius*first} 0 ${this.cornerRadius} ${this.cornerRadius*second} ${this.cornerRadius} ${this.cornerRadius}`;
-        data += `v${this.size[1]-this.cornerRadius}`;
         this.node.setAttribute('d', data);
     }
 }

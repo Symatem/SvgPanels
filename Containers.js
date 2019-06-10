@@ -1,6 +1,6 @@
 import { vec2, mat2d } from './gl-matrix.js';
 import { Panel } from './Panel.js';
-import { LabelPanel, RectPanel, SpeechBalloonPanel, TabHandlePanel, TextFieldPanel } from './Atoms.js';
+import { LabelPanel, RectPanel, SpeechBalloonPanel, TextFieldPanel } from './Atoms.js';
 
 export class ContainerPanel extends Panel {
     constructor(position, size, node=Panel.createElement('g')) {
@@ -235,7 +235,6 @@ export class PopupMenuPanel extends ButtonPanel {
             this.updateOverlayPosition();
         }, cssClass);
         this.overlayPanel = new AdaptiveSizeContainerPanel(vec2.create());
-        this.overlayPanel.padding = vec2.fromValues(4, 2);
         this.overlayPanel.backgroundPanel = new SpeechBalloonPanel(vec2.create(), vec2.create());
         this.overlayPanel.backgroundPanel.node.classList.add('popupOverlay');
         if(cssClass == 'toolbarMenuButton') {
@@ -353,9 +352,10 @@ export class TilingPanel extends ContainerPanel {
     constructor(position, size) {
         super(position, size);
         this.axis = 0;
-        this.sizeAlongAxis = 'sumOfChildren'; // sumOfChildren, alignFront, alignCenter, alignBack, number (index of child to be stretched, negative counts from end)
+        this.sizeAlongAxis = 'shrinkToFit'; // shrinkToFit, alignFront, alignCenter, alignBack, number (index of child to be stretched, negative values count from end)
         this.otherAxisSizeStays = false;
         this.otherAxisAlignment = 0.0; // -0.5, 0.0, 0.5, stretch
+        this.interElementSpacing = 0;
         this.padding = vec2.create();
     }
 
@@ -366,6 +366,8 @@ export class TilingPanel extends ContainerPanel {
             totalSize += child.size[this.axis];
             max = Math.max(max, child.size[1-this.axis]);
         }
+        if(this.children.length > 0)
+            totalSize += this.interElementSpacing*(this.children.length-1);
         if(this.otherAxisSizeStays)
             max = this.size[1-this.axis];
         if(typeof this.sizeAlongAxis == 'number') {
@@ -388,13 +390,13 @@ export class TilingPanel extends ContainerPanel {
                 child.size[1-this.axis] = max;
                 child.updateSize();
             }
-            offset += child.size[this.axis];
+            offset += child.size[this.axis]+this.interElementSpacing;
         }
-        if(this.sizeAlongAxis == 'sumOfChildren')
+        if(this.sizeAlongAxis == 'shrinkToFit')
             this.size[this.axis] = totalSize;
         if(!this.otherAxisSizeStays)
             this.size[1-this.axis] = max;
-        if(this.sizeAlongAxis == 'sumOfChildren' || !this.otherAxisSizeStays) {
+        if(this.sizeAlongAxis == 'shrinkToFit' || !this.otherAxisSizeStays) {
             vec2.scaleAndAdd(this.size, this.size, this.padding, 2.0);
             super.updateSize();
         }
@@ -409,7 +411,7 @@ export class TilingPanel extends ContainerPanel {
 export class ConfigurableSplitViewPanel extends TilingPanel {
     constructor(position, size) {
         super(position, size);
-        this.sizeAlongAxis = 'sumOfChildren';
+        this.sizeAlongAxis = 'shrinkToFit';
         this.otherAxisSizeStays = true;
         this.otherAxisAlignment = 'stretch';
         this.separatorSize = 3;
@@ -562,7 +564,8 @@ export class TabsViewPanel extends TilingPanel {
         });
         this.tabsContainer = new RadioButtonsPanel(vec2.create(), vec2.create());
         this.header.appendChild(this.tabsContainer);
-        this.tabsContainer.axis = 0;
+        this.tabsContainer.axis = 1-this.axis;
+        this.tabsContainer.interElementSpacing = 4;
         this.tabsContainer.onChange = () => {
             if(this.content)
                 this.body.removeChild(this.content);
@@ -576,13 +579,35 @@ export class TabsViewPanel extends TilingPanel {
     }
 
     recalculateLayout() {
-        this.header.size[1] = Math.min(this.tabsContainer.size[1], this.size[1]);
+        if(this.tabsContainer.axis != 1-this.axis) {
+            this.tabsContainer.axis = 1-this.axis;
+            this.tabsContainer.recalculateLayout();
+            for(const tabHandle of this.tabsContainer.children) {
+                this.updateTabHanldeCorners(tabHandle);
+                tabHandle.backgroundPanel.updateSize();
+            }
+        }
+        this.header.size[this.axis] = Math.min(this.tabsContainer.size[this.axis], this.size[this.axis]);
+        this.header.updateSize();
         super.recalculateLayout();
     }
 
+    updateTabHanldeCorners(tabHandle) {
+        tabHandle.backgroundPanel.cornerRadiusTopLeft = tabHandle.backgroundPanel.cornerRadius;
+        if(this.tabsContainer.axis == 0) {
+            tabHandle.backgroundPanel.cornerRadiusTopRight = tabHandle.backgroundPanel.cornerRadius;
+            tabHandle.backgroundPanel.cornerRadiusBottomLeft = 0;
+        } else {
+            tabHandle.backgroundPanel.cornerRadiusTopRight = 0;
+            tabHandle.backgroundPanel.cornerRadiusBottomLeft = tabHandle.backgroundPanel.cornerRadius;
+        }
+        tabHandle.backgroundPanel.cornerRadiusBottomRight = 0;
+    }
+
     addTab() {
-        const tabHandle = new ButtonPanel(vec2.create(), undefined, undefined, new TabHandlePanel(vec2.create(), vec2.create()));
+        const tabHandle = new ButtonPanel(vec2.create(), undefined, 'tabHandle', new SpeechBalloonPanel(vec2.create(), vec2.create()));
         this.tabsContainer.appendChild(tabHandle);
+        this.updateTabHanldeCorners(tabHandle);
         tabHandle.padding = vec2.fromValues(11, 3);
         tabHandle.registerPointerEvents((event) => {
             const position = tabHandle.getRootPosition();
@@ -610,7 +635,7 @@ export class TabsViewPanel extends TilingPanel {
                     if(!(tabsViewPanel instanceof TabsViewPanel) || !tabsViewPanel.enableTabDragging)
                         return;
                     let index = 0;
-                    while(index < tabsViewPanel.tabsContainer.children.length && tabsViewPanel.tabsContainer.children[index].position[0] < position[0])
+                    while(index < tabsViewPanel.tabsContainer.children.length && tabsViewPanel.tabsContainer.children[index].position[this.tabsContainer.axis] < position[this.tabsContainer.axis])
                         ++index;
                     tabHandle.node.classList.remove('disabled');
                     tabsViewPanel.tabsContainer.appendChild(tabHandle);

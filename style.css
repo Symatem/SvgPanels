@@ -16,7 +16,7 @@
     animation: fadeOut 0.25s ease-in-out forwards;
 }
 
-.disabled,.fadeOut {
+.disabled,.fadeOut,.selectionRect,.sliderBar {
     pointer-events: none;
 }
 
@@ -30,6 +30,10 @@
 
 .verticalResizingHandle {
     cursor: row-resize;
+}
+
+body {
+    margin: 0px;
 }
 
 svg {
@@ -99,7 +103,7 @@ svg {
     fill: #424242;
 }
 
-.speechBalloon {
+.popupOverlay {
     fill: rgba(26, 26, 26, 0.937);
 }
 
@@ -141,6 +145,22 @@ rect.button:active {
     fill: #5680C2;
 }
 
+rect.popupMenuButton {
+    fill: #2C2C2C;
+}
+
+rect.popupMenuButton:hover {
+    fill: #3B3B3B;
+}
+
+rect.popupMenuButton:active,rect.popupMenuButton.active {
+    fill: #696E76;
+}
+
+rect.toolbarMenuButton:active,rect.toolbarMenuButton.active {
+    fill: #5680C2;
+}
+
 .checkbox > rect {
     fill: #666666;
 }
@@ -163,4 +183,28 @@ rect.button:active {
 
 .tabHandle:active,.tabHandle.active {
     fill: #424242;
+}
+
+.scrollBar {
+    fill: #676767;
+}
+
+.scrollBar:active {
+    fill: #6C6C6C;
+}
+
+.slider > rect {
+    fill: rgb(87, 87, 87);
+}
+
+.slider > rect:hover {
+    fill: rgb(102, 102, 102);
+}
+
+.slider > rect:active {
+    fill: rgb(49, 49, 49);
+}
+
+.slider > rect.sliderBar {
+    fill: rgb(83, 125, 191);
 }

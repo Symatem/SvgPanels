@@ -130,7 +130,7 @@ export class Panel {
         function refineEvent(event) {
             if(event.touches) {
                 event.modifierKey = (event.touches.length === 2);
-                event.pointers = event.touches;
+                event.pointers = event.changedTouches;
             } else {
                 event.modifierKey = event.shiftKey;
                 event.pointers = [event];
@@ -140,7 +140,7 @@ export class Panel {
                 for(const pointer of event.pointers)
                     pointer.position = vec2.fromValues(pointer.clientX-bounds.x-bounds.width*0.5, pointer.clientY-bounds.y-bounds.height*0.5);
             } else for(const pointer of event.pointers)
-                pointer.position = vec2.fromValues(pointer.clientX, pointer.clientY)
+                pointer.position = vec2.fromValues(pointer.clientX, pointer.clientY);
         }
         if(onZoom)
             this.node.onwheel = (event) => {
@@ -151,8 +151,7 @@ export class Panel {
             };
         this.node.onmousedown = this.node.ontouchstart = (event) => {
             event.stopPropagation();
-            if(this.root.node.ontouchstart)
-                return;
+            event.preventDefault();
             refineEvent(event);
             let primaryTouchID, zoomPointerDistance, moved = false;
             if(event.touches) {
@@ -180,6 +179,7 @@ export class Panel {
             };
             this.root.node.onmouseup = this.root.node.ontouchend = this.root.node.onmouseleave = this.root.node.ontouchleave = this.root.node.ontouchcancel = (event) => {
                 event.stopPropagation();
+                event.preventDefault();
                 if(event.touches && event.touches.length > 0 && primaryTouchID != event.changedTouches[0].identifier)
                     return;
                 refineEvent(event);

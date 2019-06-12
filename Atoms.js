@@ -1,15 +1,23 @@
 import { vec2 } from './gl-matrix.js';
 import { Panel } from './Panel.js';
 
+const phantomRoot = Panel.createElement('svg');
+document.body.appendChild(phantomRoot);
+phantomRoot.setAttribute('width', 0);
+phantomRoot.setAttribute('height', 0);
+
 export class LabelPanel extends Panel {
-    constructor(position) {
+    constructor(position, text) {
         super(position, vec2.create(), Panel.createElement('text'));
+        this.text = text;
     }
 
     recalculateLayout() {
-        if(!this.parent)
-            return;
+        if(!this.root)
+            phantomRoot.appendChild(this.node);
         const bbox = this.node.getBBox();
+        if(!this.root && this.parent)
+            this.parent.node.appendChild(this.node);
         this.size[0] = bbox.width;
         this.size[1] = bbox.height;
         this.updateSize();
@@ -156,8 +164,10 @@ export class TextAreaPanel extends XhtmlPanel {
 }
 
 export class ImagePanel extends Panel {
-    constructor(position, size) {
+    constructor(position, size, href) {
         super(position, size, Panel.createElement('image'));
+        this.href = href;
+        this.updateSize();
     }
 
     updateSize() {

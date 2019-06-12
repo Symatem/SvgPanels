@@ -84,12 +84,11 @@ text {
     pointer-events: none;
 }
 
-.checkbox > text {
+.checkbox > image {
     opacity: 0;
-    dominant-baseline: middle;
 }
 
-.checkbox.active > text {
+.checkbox.active > image {
     opacity: 1;
 }
 

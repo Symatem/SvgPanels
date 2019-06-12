@@ -1,6 +1,6 @@
 import { vec2, mat2d } from './gl-matrix.js';
 import { Panel } from './Panel.js';
-import { LabelPanel, RectPanel, SpeechBalloonPanel, TextFieldPanel } from './Atoms.js';
+import { LabelPanel, RectPanel, SpeechBalloonPanel, TextFieldPanel, ImagePanel } from './Atoms.js';
 
 export class ContainerPanel extends Panel {
     constructor(position, size, node=Panel.createElement('g')) {
@@ -29,7 +29,10 @@ export class ContainerPanel extends Panel {
             this.node.removeChild(this._backgroundPanel.node);
         this._backgroundPanel = backgroundPanel;
         if(this._backgroundPanel) {
-            this.node.appendChild(this._backgroundPanel.node);
+            if(this.node.childNodes.length > 0)
+                this.node.insertBefore(this._backgroundPanel.node, this.node.childNodes[0]);
+            else
+                this.node.appendChild(this._backgroundPanel.node);
             this._backgroundPanel.parent = this;
             this._backgroundPanel.root = this.root;
             this._backgroundPanel.size = this.size;
@@ -42,13 +45,28 @@ export class ContainerPanel extends Panel {
             this._backgroundPanel.updateSize();
     }
 
-    appendChild(child) {
-        if(child.parent)
+    insertChild(child, newIndex=-1) {
+        if(!child || (child.parent && child.parent != this))
             return false;
-        this.node.appendChild(child.node);
-        child.parent = this;
-        child.root = this.root;
-        this.children.push(child);
+        let oldIndex;
+        if(child.parent == this) {
+            oldIndex = this.children.indexOf(child);
+            if(oldIndex == -1 || oldIndex == newIndex || newIndex < 0 || newIndex >= this.children.length)
+                return false;
+            this.children.splice(oldIndex, 1);
+        } else {
+            if(newIndex < 0)
+                newIndex += this.children.length+1;
+            if(newIndex < 0 || newIndex > this.children.length)
+                return false;
+            child.parent = this;
+            child.root = this.root;
+        }
+        if(newIndex == this.children.length)
+            this.node.appendChild(child.node);
+        else
+            this.node.insertBefore(child.node, this.children[(newIndex == oldIndex+1) ? newIndex+1 : newIndex].node);
+        this.children.splice(newIndex, 0, child);
         return true;
     }
 
@@ -59,25 +77,11 @@ export class ContainerPanel extends Panel {
         child.root = undefined;
         this.children.splice(this.children.indexOf(child), 1);
         this.node.removeChild(child.node);
-        this.recalculateLayout();
         return true;
     }
 
-    reorderChild(child, newIndex) {
-        const index = this.children.indexOf(child);
-        if(!child || child.parent != this || index == -1 || index == newIndex || newIndex < 0 || newIndex >= this.children.length)
-            return false;
-        this.children.splice(index, 1);
-        this.children.splice(newIndex, 0, child);
-        if(newIndex == this.node.childNodes.length-1)
-            this.node.appendChild(child.node);
-        else
-            this.node.insertBefore(child.node, this.node.childNodes[(newIndex == index+1) ? newIndex+1 : newIndex]);
-        return true;
-    }
-
-    appendChildAnimated(child) {
-        if(!this.appendChild(child))
+    insertChildAnimated(child, newIndex=-1) {
+        if(!this.insertChild(child, newIndex))
             return false;
         child.animateVisibilityTo(true);
         return true;
@@ -87,7 +91,10 @@ export class ContainerPanel extends Panel {
         if(child.parent != this)
             return false;
         child.animateVisibilityTo(false);
-        window.setTimeout(this.removeChild.bind(this, child), 250);
+        window.setTimeout(() => {
+            this.removeChild(child);
+            this.recalculateLayout();
+        }, 250);
         return true;
     }
 
@@ -120,9 +127,9 @@ export class RootPanel extends ContainerPanel {
         this.node.setAttribute('width', '100%');
         this.node.setAttribute('height', '100%');
         this.content = new ContainerPanel(vec2.create(), vec2.create());
-        this.appendChild(this.content);
+        this.insertChild(this.content);
         this.overlays = new ContainerPanel(vec2.create(), vec2.create());
-        this.appendChild(this.overlays);
+        this.insertChild(this.overlays);
         this.overlayPane = Panel.createElement('rect', this.overlays.node);
         this.overlayPane.setAttribute('width', '100%');
         this.overlayPane.setAttribute('height', '100%');
@@ -164,22 +171,28 @@ export class RootPanel extends ContainerPanel {
         this.node.setAttribute('height', this.size[1]);
     }
 
-    openModalOverlay(overlay, onClose) {
-        this.overlayPane.style.visibility = '';
-        this.overlayPane.onmousedown = this.overlayPane.ontouchstart = (event) => {
-            event.stopPropagation();
-            event.preventDefault();
-            this.closeModalOverlay();
-            if(onClose)
-                onClose();
-        };
-        this.overlays.appendChild(overlay);
+    openModalOverlay(overlay) {
+        if(this.overlayPane.style.visibility != '') {
+            this.overlayPane.style.visibility = '';
+            this.overlayPane.onmousedown = this.overlayPane.ontouchstart = (event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                this.closeModalOverlay(overlay);
+            };
+        }
+        this.overlays.insertChild(overlay);
     }
 
-    closeModalOverlay() {
-        this.overlayPane.style.visibility = 'hidden';
-        for(const child of this.overlays.children)
+    closeModalOverlay(overlay) {
+        const index = this.overlays.children.indexOf(overlay);
+        while(this.overlays.children.length > index) {
+            const child = this.overlays.children[index];
+            if(child.onClose)
+                child.onClose();
             this.overlays.removeChild(child);
+        }
+        if(index == 0)
+            this.overlayPane.style.visibility = 'hidden';
     }
 }
 
@@ -222,28 +235,31 @@ export class ButtonPanel extends AdaptiveSizeContainerPanel {
         this.backgroundPanel = backgroundPanel;
         if(cssClass)
             this.backgroundPanel.node.classList.add(cssClass);
-        this.backgroundPanel.cornerRadius = 4;
+        this.backgroundPanel.cornerRadius = (cssClass == 'toolbarMenuButton') ? 0 : 4;
     }
 }
 
 export class PopupMenuPanel extends ButtonPanel {
     constructor(position, onOpen, cssClass='popupMenuButton') {
         super(position, () => {
-            this.root.openModalOverlay(this.overlayPanel, () => {
-                this.backgroundPanel.node.classList.remove('active');
-            });
-            this.backgroundPanel.node.classList.add('active');
-            onOpen();
-            this.overlayPanel.recalculateLayout();
-            this.updateOverlayPosition();
+            if(this.backgroundPanel.node.classList.contains('active'))
+                this.root.closeModalOverlay(this.overlayPanel);
+            else {
+                this.backgroundPanel.node.classList.add('active');
+                if(onOpen)
+                    onOpen();
+                this.updateOverlayPosition();
+                this.root.openModalOverlay(this.overlayPanel);
+            }
         }, cssClass);
         this.overlayPanel = new AdaptiveSizeContainerPanel(vec2.create());
         this.overlayPanel.backgroundPanel = new SpeechBalloonPanel(vec2.create(), vec2.create());
         this.overlayPanel.backgroundPanel.node.classList.add('popupOverlay');
-        if(cssClass == 'toolbarMenuButton') {
-            this.backgroundPanel.cornerRadius = 0;
+        this.overlayPanel.onClose = () => {
+            this.backgroundPanel.node.classList.remove('active');
+        };
+        if(cssClass == 'toolbarMenuButton')
             this.style = 'vertical';
-        }
     }
 
     updateOverlayPosition() {
@@ -290,11 +306,6 @@ export class PopupMenuPanel extends ButtonPanel {
         this.overlayPanel.backgroundPanel.updateSize();
         this.overlayPanel.updatePosition();
     }
-
-    updatePosition() {
-        super.updatePosition();
-        this.updateOverlayPosition();
-    }
 }
 
 export class CheckboxPanel extends ContainerPanel {
@@ -302,16 +313,15 @@ export class CheckboxPanel extends ContainerPanel {
         super(position, vec2.fromValues(12, 12));
         this.node.classList.add('checkbox');
         this.rectPanel = new RectPanel(vec2.create(), this.size);
-        this.appendChild(this.rectPanel);
+        this.insertChild(this.rectPanel);
         this.rectPanel.cornerRadius = 2;
         this.registerClickEvent(() => {
             this.checked = !this.checked;
             if(onChange)
                 onChange();
         });
-        this.labelPanel = new LabelPanel(vec2.create());
-        this.labelPanel.text = '✔';
-        this.appendChild(this.labelPanel);
+        this.imagePanel = new ImagePanel(vec2.create(), vec2.fromValues(9, 9), 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNiIgaGVpZ2h0PSIyNiI+CiAgICA8cGF0aCBmaWxsPSIjRkZGIiBkPSJNMjIuNTY2NDA2IDQuNzMwNDY5TDIwLjc3MzQzOCAzLjUxMTcxOUMyMC4yNzczNDQgMy4xNzU3ODEgMTkuNTk3NjU2IDMuMzA0Njg4IDE5LjI2NTYyNSAzLjc5Njg3NUwxMC40NzY1NjMgMTYuNzU3ODEzTDYuNDM3NSAxMi43MTg3NUM2LjAxNTYyNSAxMi4yOTY4NzUgNS4zMjgxMjUgMTIuMjk2ODc1IDQuOTA2MjUgMTIuNzE4NzVMMy4zNzEwOTQgMTQuMjUzOTA2QzIuOTQ5MjE5IDE0LjY3NTc4MSAyLjk0OTIxOSAxNS4zNjMyODEgMy4zNzEwOTQgMTUuNzg5MDYzTDkuNTgyMDMxIDIyQzkuOTI5Njg4IDIyLjM0NzY1NiAxMC40NzY1NjMgMjIuNjEzMjgxIDEwLjk2ODc1IDIyLjYxMzI4MUMxMS40NjA5MzggMjIuNjEzMjgxIDExLjk1NzAzMSAyMi4zMDQ2ODggMTIuMjc3MzQ0IDIxLjgzOTg0NEwyMi44NTU0NjkgNi4yMzQzNzVDMjMuMTkxNDA2IDUuNzQyMTg4IDIzLjA2MjUgNS4wNjY0MDYgMjIuNTY2NDA2IDQuNzMwNDY5WiIvPgo8L3N2Zz4K');
+        this.insertChild(this.imagePanel);
         this.rectPanel.updateSize();
         this.rectPanel.updatePosition();
     }
@@ -425,9 +435,8 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
             let index = 0;
             while(index < this.children.length && this.children[index].position[this.axis] < position)
                 ++index;
-            --index;
-            const prevChild = this.children[index],
-                  nextChild = this.children[index+1],
+            const prevChild = this.children[index-1],
+                  nextChild = this.children[index],
                   prevChildOriginalPosition = prevChild.position[this.axis],
                   nextChildOriginalPosition = nextChild.position[this.axis],
                   prevChildOriginalSize = prevChild.size[this.axis],
@@ -474,20 +483,18 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
         this.recalculateLayout();
     }
 
-    appendChild(child, relativeSize) {
-        if(!super.appendChild(child))
-            return false;
-        for(let i = 0; i < this.children.length; ++i)
-            this.children[i].relativeSize *= 1-relativeSize;
-        child.relativeSize = relativeSize;
-        return true;
+    normalizeRelativeSizes() {
+        let childSizeSum = 0;
+        for(const child of this.children)
+            childSizeSum += child.size[this.axis];
+        for(const child of this.children)
+            child.relativeSize = child.size[this.axis]/childSizeSum;
     }
 
     removeChild(child) {
         if(!super.removeChild(child))
             return false;
-        for(let i = 0; i < this.children.length; ++i)
-            this.children[i].relativeSize /= 1-child.relativeSize;
+        this.normalizeRelativeSizes();
         return true;
     }
 }
@@ -498,14 +505,14 @@ export class RadioButtonsPanel extends TilingPanel {
         this.onChange = onChange;
     }
 
-    appendChild(child) {
+    insertChild(child, newIndex=-1) {
         if(!child.node.onmousedown && !child.node.ontouchstart)
             child.registerClickEvent(() => {
                 this.activeButton = child;
                 if(this.onChange)
                     this.onChange();
             });
-        return super.appendChild(child);
+        return super.insertChild(child, newIndex);
     }
 
     removeChild(child) {
@@ -539,7 +546,7 @@ export class TabsViewPanel extends TilingPanel {
         this.otherAxisAlignment = 'stretch';
         this.enableTabDragging = false;
         this.header = new ClippingViewPanel(vec2.create(), vec2.create());
-        super.appendChild(this.header);
+        this.insertChild(this.header);
         this.header.backgroundPanel.registerClickEvent(() => {
             if(!this.tabsContainer.activeButton)
                 return;
@@ -548,7 +555,7 @@ export class TabsViewPanel extends TilingPanel {
                 this.tabsContainer.onChange();
         });
         this.tabsContainer = new RadioButtonsPanel(vec2.create(), vec2.create());
-        this.header.appendChild(this.tabsContainer);
+        this.header.insertChild(this.tabsContainer);
         this.tabsContainer.axis = 1-this.axis;
         this.tabsContainer.interChildSpacing = 4;
         this.tabsContainer.onChange = () => {
@@ -556,11 +563,11 @@ export class TabsViewPanel extends TilingPanel {
                 this.body.removeChild(this.content);
             this.content = (this.tabsContainer.activeButton) ? this.tabsContainer.activeButton.content : undefined;
             if(this.content)
-                this.body.appendChild(this.content);
+                this.body.insertChild(this.content);
             this.body.recalculateLayout();
         };
         this.body = new PanePanel(vec2.create(), vec2.create());
-        this.appendChild(this.body);
+        this.insertChild(this.body);
     }
 
     recalculateLayout() {
@@ -591,7 +598,7 @@ export class TabsViewPanel extends TilingPanel {
 
     addTab() {
         const tabHandle = new ButtonPanel(vec2.create(), undefined, 'tabHandle', new SpeechBalloonPanel(vec2.create(), vec2.create()));
-        this.tabsContainer.appendChild(tabHandle);
+        this.tabsContainer.insertChild(tabHandle);
         this.updateTabHanldeCorners(tabHandle);
         tabHandle.padding = vec2.fromValues(11, 3);
         tabHandle.registerPointerEvents((event) => {
@@ -602,8 +609,8 @@ export class TabsViewPanel extends TilingPanel {
                     return;
                 if(!moved) {
                     tabHandle.node.classList.add('disabled');
-                    this.tabsContainer.removeChild(tabHandle);
-                    this.root.overlays.appendChild(tabHandle);
+                    this.removeTab(tabHandle);
+                    this.root.overlays.insertChild(tabHandle);
                 }
                 vec2.add(tabHandle.position, position, event.pointers[0].position);
                 tabHandle.updatePosition();
@@ -623,8 +630,7 @@ export class TabsViewPanel extends TilingPanel {
                     while(index < tabsViewPanel.tabsContainer.children.length && tabsViewPanel.tabsContainer.children[index].position[this.tabsContainer.axis] < position[this.tabsContainer.axis])
                         ++index;
                     tabHandle.node.classList.remove('disabled');
-                    tabsViewPanel.tabsContainer.appendChild(tabHandle);
-                    tabsViewPanel.tabsContainer.reorderChild(tabHandle, index);
+                    tabsViewPanel.tabsContainer.insertChild(tabHandle, index);
                     tabsViewPanel.tabsContainer.recalculateLayout();
                 }
                 if(!tabsViewPanel)
@@ -638,7 +644,10 @@ export class TabsViewPanel extends TilingPanel {
     }
 
     removeTab(tabHandle) {
-        return this.tabsContainer.removeChild(tabHandle);
+        if(!this.tabsContainer.removeChild(tabHandle))
+            return false;
+        this.tabsContainer.recalculateLayout();
+        return true;
     }
 }
 
@@ -646,7 +655,7 @@ export class InfiniteViewPanel extends ClippingViewPanel {
     constructor(position, size) {
         super(position, size);
         this.content = new AdaptiveSizeContainerPanel(vec2.create());
-        this.appendChild(this.content);
+        this.insertChild(this.content);
         this.contentTransform = mat2d.create();
         this.inverseContentTransform = mat2d.create();
         this.velocity = vec2.create();
@@ -660,7 +669,7 @@ export class InfiniteViewPanel extends ClippingViewPanel {
                 return [(event, moved) => {
                     if(!this.selectionRect) {
                         this.selectionRect = new RectPanel(vec2.create(), vec2.create());
-                        this.appendChildAnimated(this.selectionRect);
+                        this.insertChildAnimated(this.selectionRect);
                         this.selectionRect.node.classList.add('selectionRect');
                     }
                     this.selectionRect.setBounds(dragOrigin, event.pointers[0].position);
@@ -759,7 +768,7 @@ export class ScrollViewPanel extends InfiniteViewPanel {
     startedMoving() {
         for(let i = 0; i < 2; ++i)
             if(this.scrollBars[i].showIf == 'moving' && this.scrollBars[i].size[i] < this.scrollBars[i].maxLength)
-                this.appendChildAnimated(this.scrollBars[i]);
+                this.insertChildAnimated(this.scrollBars[i]);
     }
 
     stoppedMoving() {
@@ -782,7 +791,7 @@ export class ScrollViewPanel extends InfiniteViewPanel {
             this.scrollBars[i].size[1-i] = this.scrollBarWidth;
             this.scrollBars[i].updateSize();
             if(this.scrollBars[i].showIf == 'always' || (this.scrollBars[i].showIf == 'overflow' && this.scrollBars[i].size[i] < this.scrollBars[i].maxLength))
-                this.appendChildAnimated(this.scrollBars[i]);
+                this.insertChildAnimated(this.scrollBars[i]);
             else if(this.scrollBars[i].showIf != 'moving')
                 this.removeChildAnimated(this.scrollBars[i]);
         }
@@ -804,10 +813,10 @@ export class SliderPanel extends ContainerPanel {
         super(position, size);
         this.backgroundPanel = new RectPanel(vec2.create(), size);
         this.barPanel = new RectPanel(vec2.create(), vec2.create());
-        this.appendChild(this.barPanel);
+        this.insertChild(this.barPanel);
         this.barPanel.node.classList.add('sliderBar');
         this.labelPanel = new LabelPanel(vec2.create());
-        this.appendChild(this.labelPanel);
+        this.insertChild(this.labelPanel);
         this.textFieldPanel = new TextFieldPanel(vec2.create(), size);
         this.textFieldPanel.embeddedNode.onchange = this.textFieldPanel.embeddedNode.onblur = () => {
             this.value = parseFloat(this.textFieldPanel.text);
@@ -833,7 +842,7 @@ export class SliderPanel extends ContainerPanel {
                         onChange();
                     return;
                 }
-                this.appendChild(this.textFieldPanel);
+                this.insertChild(this.textFieldPanel);
                 this.textFieldPanel.text = this.labelPanel.text;
                 this.textFieldPanel.embeddedNode.focus();
             }];

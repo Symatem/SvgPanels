@@ -16,7 +16,7 @@
     animation: fadeOut 0.25s ease-in-out forwards;
 }
 
-.disabled,.fadeOut,.selectionRect,.sliderBar {
+text,image,.disabled,.fadeOut,.selectionRect,.sliderBar {
     pointer-events: none;
 }
 
@@ -81,7 +81,6 @@ text,textarea,input[type="text"] {
 text {
     text-anchor: middle;
     dominant-baseline: central;
-    pointer-events: none;
 }
 
 .checkbox > image {

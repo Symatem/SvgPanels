@@ -28,11 +28,13 @@ export class Panel {
         this.size = size;
         this.node = node;
         this._selected = false;
-        node.panel = this;
+        if(node)
+            node.panel = this;
     }
 
     updatePosition() {
-        this.node.setAttribute('transform', `translate(${this.position[0]}, ${this.position[1]})`);
+        if(this.node)
+            this.node.setAttribute('transform', `translate(${this.position[0]}, ${this.position[1]})`);
     }
 
     updateSize() {}
@@ -59,12 +61,12 @@ export class Panel {
     }
 
     getRootMatrix() {
-        const mat = this.root.node.getScreenCTM().inverse().multiply(this.node.getScreenCTM());
+        const mat = this.root.centeringPanel.node.getScreenCTM().inverse().multiply(this.node.getScreenCTM());
         return mat2d.fromValues(mat.a, mat.b, mat.c, mat.d, mat.e, mat.f);
     }
 
     getRootPosition() {
-        const rootCTM = this.root.node.getScreenCTM(), nodeCTM = this.node.getScreenCTM();
+        const rootCTM = this.root.centeringPanel.node.getScreenCTM(), nodeCTM = this.node.getScreenCTM();
         return vec2.fromValues(nodeCTM.e-rootCTM.e, nodeCTM.f-rootCTM.f);
     }
 

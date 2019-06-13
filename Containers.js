@@ -46,26 +46,28 @@ export class ContainerPanel extends Panel {
     }
 
     insertChild(child, newIndex=-1) {
-        if(!child || (child.parent && child.parent != this))
+        if(newIndex < 0)
+            newIndex += this.children.length+1;
+        if(!child || (child.parent && child.parent != this) || newIndex < 0)
             return false;
         let oldIndex;
         if(child.parent == this) {
             oldIndex = this.children.indexOf(child);
-            if(oldIndex == -1 || oldIndex == newIndex || newIndex < 0 || newIndex >= this.children.length)
+            if(oldIndex == -1 || oldIndex == newIndex || newIndex >= this.children.length)
                 return false;
             this.children.splice(oldIndex, 1);
         } else {
-            if(newIndex < 0)
-                newIndex += this.children.length+1;
-            if(newIndex < 0 || newIndex > this.children.length)
+            if(newIndex > this.children.length)
                 return false;
             child.parent = this;
             child.root = this.root;
         }
-        if(newIndex == this.children.length)
-            this.node.appendChild(child.node);
-        else
-            this.node.insertBefore(child.node, this.children[(newIndex == oldIndex+1) ? newIndex+1 : newIndex].node);
+        if(child.node) {
+            if(newIndex == this.children.length)
+                this.node.appendChild(child.node);
+            else
+                this.node.insertBefore(child.node, this.children[(newIndex == oldIndex+1) ? newIndex+1 : newIndex].node);
+        }
         this.children.splice(newIndex, 0, child);
         return true;
     }
@@ -76,7 +78,8 @@ export class ContainerPanel extends Panel {
         delete child.parent;
         child.root = undefined;
         this.children.splice(this.children.indexOf(child), 1);
-        this.node.removeChild(child.node);
+        if(child.node)
+            this.node.removeChild(child.node);
         return true;
     }
 
@@ -126,14 +129,13 @@ export class RootPanel extends ContainerPanel {
         this.root = this;
         this.node.setAttribute('width', '100%');
         this.node.setAttribute('height', '100%');
+        this.centeringPanel = new ContainerPanel(vec2.create(), vec2.create());
+        this.insertChild(this.centeringPanel);
         this.content = new ContainerPanel(vec2.create(), vec2.create());
-        this.insertChild(this.content);
+        this.centeringPanel.insertChild(this.content);
         this.overlays = new ContainerPanel(vec2.create(), vec2.create());
-        this.insertChild(this.overlays);
-        this.overlayPane = Panel.createElement('rect', this.overlays.node);
-        this.overlayPane.setAttribute('width', '100%');
-        this.overlayPane.setAttribute('height', '100%');
-        this.overlayPane.style.visibility = 'hidden';
+        this.centeringPanel.insertChild(this.overlays);
+        this.modalOverlayBackgroundPanel = new RectPanel(vec2.create(), this.size);
         this.defsNode = Panel.createElement('defs', this.node);
         const blurFilter = Panel.createElement('filter', this.defsNode);
         blurFilter.setAttribute('id', 'blurFilter');
@@ -162,8 +164,11 @@ export class RootPanel extends ContainerPanel {
     recalculateLayout() {
         this.size[0] = this.node.clientWidth;
         this.size[1] = this.node.clientHeight;
-        vec2.scale(this.content.position, this.size, 0.5);
-        this.content.updatePosition();
+        vec2.scale(this.centeringPanel.position, this.size, 0.5);
+        this.centeringPanel.updatePosition();
+        this.modalOverlayBackgroundPanel.updateSize();
+        for(const child of this.content.children)
+            child.recalculateLayout();
     }
 
     updateSize() {
@@ -172,19 +177,17 @@ export class RootPanel extends ContainerPanel {
     }
 
     openModalOverlay(overlay) {
-        if(this.overlayPane.style.visibility != '') {
-            this.overlayPane.style.visibility = '';
-            this.overlayPane.onmousedown = this.overlayPane.ontouchstart = (event) => {
-                event.stopPropagation();
-                event.preventDefault();
+        if(!this.modalOverlayBackgroundPanel.parent) {
+            this.centeringPanel.insertChild(this.modalOverlayBackgroundPanel, -2);
+            this.modalOverlayBackgroundPanel.registerClickEvent((event) => {
                 this.closeModalOverlay(overlay);
-            };
+            });
         }
         this.overlays.insertChild(overlay);
     }
 
     closeModalOverlay(overlay) {
-        const index = this.overlays.children.indexOf(overlay);
+        const index = Math.max(0, this.overlays.children.indexOf(overlay));
         while(this.overlays.children.length > index) {
             const child = this.overlays.children[index];
             if(child.onClose)
@@ -192,7 +195,21 @@ export class RootPanel extends ContainerPanel {
             this.overlays.removeChild(child);
         }
         if(index == 0)
-            this.overlayPane.style.visibility = 'hidden';
+            this.centeringPanel.removeChild(this.modalOverlayBackgroundPanel);
+    }
+
+    toggleFullscreen() {
+        if(document.fullscreenElement || document.webkitFullscreenElement) {
+            if(document.webkitCancelFullScreen)
+                document.webkitCancelFullScreen();
+            else
+                document.exitFullscreen();
+        } else {
+            if(document.documentElement.webkitRequestFullscreen)
+                document.documentElement.webkitRequestFullscreen();
+            else
+                this.node.requestFullscreen();
+        }
     }
 }
 
@@ -223,88 +240,6 @@ export class AdaptiveSizeContainerPanel extends ContainerPanel {
             }
         }
         this.updateSize();
-    }
-}
-
-export class ButtonPanel extends AdaptiveSizeContainerPanel {
-    constructor(position, onClick, cssClass='button', backgroundPanel=new RectPanel(vec2.create(), vec2.create())) {
-        super(position);
-        this.padding = vec2.fromValues(4, 2);
-        if(onClick)
-            this.registerClickEvent(onClick);
-        this.backgroundPanel = backgroundPanel;
-        if(cssClass)
-            this.backgroundPanel.node.classList.add(cssClass);
-        this.backgroundPanel.cornerRadius = (cssClass == 'toolbarMenuButton') ? 0 : 4;
-    }
-}
-
-export class PopupMenuPanel extends ButtonPanel {
-    constructor(position, onOpen, cssClass='popupMenuButton') {
-        super(position, () => {
-            if(this.backgroundPanel.node.classList.contains('active'))
-                this.root.closeModalOverlay(this.overlayPanel);
-            else {
-                this.backgroundPanel.node.classList.add('active');
-                if(onOpen)
-                    onOpen();
-                this.updateOverlayPosition();
-                this.root.openModalOverlay(this.overlayPanel);
-            }
-        }, cssClass);
-        this.overlayPanel = new AdaptiveSizeContainerPanel(vec2.create());
-        this.overlayPanel.backgroundPanel = new SpeechBalloonPanel(vec2.create(), vec2.create());
-        this.overlayPanel.backgroundPanel.node.classList.add('popupOverlay');
-        this.overlayPanel.onClose = () => {
-            this.backgroundPanel.node.classList.remove('active');
-        };
-        if(cssClass == 'toolbarMenuButton')
-            this.style = 'vertical';
-    }
-
-    updateOverlayPosition() {
-        const bounds = this.node.getBoundingClientRect();
-        this.overlayPanel.position = this.getRootPosition();
-        this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 4;
-        this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 4;
-        this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 4;
-        this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 4;
-        const xAxisAlignment = (this.overlayPanel.position[0] < this.root.size[0]*0.5) ? 0.5 : -0.5,
-              yAxisAlignment = (this.overlayPanel.position[1] < this.root.size[1]*0.5) ? 0.5 : -0.5;
-        switch(this.style) {
-            case 'horizontal':
-                if(xAxisAlignment < 0.0) {
-                    if(yAxisAlignment < 0.0)
-                        this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 0;
-                    else
-                        this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 0;
-                } else {
-                    if(yAxisAlignment < 0.0)
-                        this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 0;
-                    else
-                        this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 0;
-                }
-                this.overlayPanel.position[0] += (bounds.width+this.overlayPanel.size[0])*xAxisAlignment;
-                this.overlayPanel.position[1] += (this.overlayPanel.size[1]-bounds.height)*yAxisAlignment;
-                break;
-            case 'vertical':
-                if(yAxisAlignment < 0.0) {
-                    if(xAxisAlignment < 0.0)
-                        this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 0;
-                    else
-                        this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 0;
-                } else {
-                    if(xAxisAlignment < 0.0)
-                        this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 0;
-                    else
-                        this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 0;
-                }
-                this.overlayPanel.position[1] += (bounds.height+this.overlayPanel.size[1])*yAxisAlignment;
-                this.overlayPanel.position[0] += (this.overlayPanel.size[0]-bounds.width)*xAxisAlignment;
-                break;
-        }
-        this.overlayPanel.backgroundPanel.updateSize();
-        this.overlayPanel.updatePosition();
     }
 }
 
@@ -365,7 +300,7 @@ export class TilingPanel extends ContainerPanel {
     constructor(position, size) {
         super(position, size);
         this.axis = 0;
-        this.sizeAlongAxis = 'shrinkToFit'; // shrinkToFit, alignFront, alignCenter, alignBack, number (index of child to be stretched, negative values count from end)
+        this.sizeAlongAxis = 'shrinkToFit'; // shrinkToFit, centering, number (index of child to be stretched, negative values count from end)
         this.otherAxisSizeStays = false;
         this.otherAxisAlignment = 0.0; // -0.5, 0.0, 0.5, stretch
         this.interChildSpacing = 0;
@@ -373,51 +308,126 @@ export class TilingPanel extends ContainerPanel {
     }
 
     recalculateLayout() {
-        let offset, max = 0, totalSize = 0;
+        let sizeAlongAxis = 0, sizeOtherAxis = 0;
         for(let i = 0; i < this.children.length; ++i) {
             const child = this.children[i];
-            totalSize += child.size[this.axis];
-            max = Math.max(max, child.size[1-this.axis]);
+            sizeAlongAxis += child.size[this.axis];
+            sizeOtherAxis = Math.max(sizeOtherAxis, child.size[1-this.axis]);
         }
         if(this.children.length > 0)
-            totalSize += this.interChildSpacing*(this.children.length-1);
+            sizeAlongAxis += this.interChildSpacing*(this.children.length-1);
         if(this.otherAxisSizeStays)
-            max = this.size[1-this.axis];
+            sizeOtherAxis = this.size[1-this.axis]-this.padding[1-this.axis]*2;
+        else
+            this.size[1-this.axis] = sizeOtherAxis+this.padding[1-this.axis]*2;
+        const availableSize = this.size[this.axis]-this.padding[this.axis]*2;
         if(typeof this.sizeAlongAxis == 'number') {
             const child = this.children[(this.sizeAlongAxis < 0) ? this.children.length+this.sizeAlongAxis : this.sizeAlongAxis];
-            child.size[this.axis] = Math.max(0, this.size[this.axis]-totalSize+child.size[this.axis]);
+            child.size[this.axis] = Math.max(0, availableSize-sizeAlongAxis+child.size[this.axis]);
             child.updateSize();
-            totalSize = this.size[this.axis];
+            sizeAlongAxis = availableSize;
         }
-        if(this.sizeAlongAxis == 'alignFront')
-            offset = -this.size[this.axis]*0.5;
-        else if(this.sizeAlongAxis == 'alignBack')
-            offset = this.size[this.axis]*0.5-totalSize;
-        else
-            offset = -0.5*totalSize;
+        if(this.sizeAlongAxis == 'shrinkToFit')
+            this.size[this.axis] = sizeAlongAxis+this.padding[this.axis]*2;
+        let offset = -0.5*sizeAlongAxis;
         for(const child of this.children) {
-            child.position[1-this.axis] = (this.otherAxisAlignment == 'stretch') ? 0 : (max-child.size[1-this.axis])*this.otherAxisAlignment;
+            child.position[1-this.axis] = (this.otherAxisAlignment == 'stretch') ? 0 : (sizeOtherAxis-child.size[1-this.axis])*this.otherAxisAlignment;
             child.position[this.axis] = offset+child.size[this.axis]*0.5;
             child.updatePosition();
-            if(this.otherAxisAlignment == 'stretch' && child.size[1-this.axis] != max) {
-                child.size[1-this.axis] = max;
+            if(this.otherAxisAlignment == 'stretch' && child.size[1-this.axis] != sizeOtherAxis) {
+                child.size[1-this.axis] = sizeOtherAxis;
                 child.updateSize();
             }
             offset += child.size[this.axis]+this.interChildSpacing;
         }
-        if(this.sizeAlongAxis == 'shrinkToFit')
-            this.size[this.axis] = totalSize;
-        if(!this.otherAxisSizeStays)
-            this.size[1-this.axis] = max;
-        if(this.sizeAlongAxis == 'shrinkToFit' || !this.otherAxisSizeStays) {
-            vec2.scaleAndAdd(this.size, this.size, this.padding, 2.0);
+        if(this.sizeAlongAxis == 'shrinkToFit' || !this.otherAxisSizeStays)
             super.updateSize();
-        }
     }
 
     updateSize() {
         super.updateSize();
-        this.recalculateLayout();
+        if(this.sizeAlongAxis != 'shrinkToFit' || this.otherAxisSizeStays)
+            this.recalculateLayout();
+    }
+}
+
+export class ButtonPanel extends TilingPanel {
+    constructor(position, onClick, cssClass='button', backgroundPanel=new RectPanel(vec2.create(), vec2.create())) {
+        super(position, vec2.create());
+        this.padding = vec2.fromValues(4, 2);
+        if(onClick)
+            this.registerClickEvent(onClick);
+        this.backgroundPanel = backgroundPanel;
+        if(cssClass)
+            this.backgroundPanel.node.classList.add(cssClass);
+        this.backgroundPanel.cornerRadius = (cssClass == 'toolbarMenuButton') ? 0 : 4;
+    }
+}
+
+export class PopupMenuPanel extends ButtonPanel {
+    constructor(position, onOpen, overlayPanel=new AdaptiveSizeContainerPanel(vec2.create()), cssClass='popupMenuButton') {
+        super(position, () => {
+            if(this.backgroundPanel.node.classList.contains('active'))
+                this.root.closeModalOverlay(this.overlayPanel);
+            else {
+                this.backgroundPanel.node.classList.add('active');
+                if(onOpen)
+                    onOpen();
+                this.updateOverlayPosition();
+                this.root.openModalOverlay(this.overlayPanel);
+            }
+        }, cssClass);
+        this.overlayPanel = overlayPanel;
+        this.overlayPanel.backgroundPanel = new SpeechBalloonPanel(vec2.create(), vec2.create());
+        this.overlayPanel.backgroundPanel.node.classList.add('popupOverlay');
+        this.overlayPanel.onClose = () => {
+            this.backgroundPanel.node.classList.remove('active');
+        };
+    }
+
+    updateOverlayPosition() {
+        const bounds = this.node.getBoundingClientRect();
+        this.overlayPanel.position = this.getRootPosition();
+        this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 4;
+        this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 4;
+        this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 4;
+        this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 4;
+        const xAxisAlignment = (this.overlayPanel.position[0] < this.root.size[0]*0.5) ? 0.5 : -0.5,
+              yAxisAlignment = (this.overlayPanel.position[1] < this.root.size[1]*0.5) ? 0.5 : -0.5;
+        switch(this.style) {
+            case 'horizontal':
+                if(xAxisAlignment < 0.0) {
+                    if(yAxisAlignment < 0.0)
+                        this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 0;
+                    else
+                        this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 0;
+                } else {
+                    if(yAxisAlignment < 0.0)
+                        this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 0;
+                    else
+                        this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 0;
+                }
+                this.overlayPanel.position[0] += (bounds.width+this.overlayPanel.size[0])*xAxisAlignment;
+                this.overlayPanel.position[1] += (this.overlayPanel.size[1]-bounds.height)*yAxisAlignment;
+                break;
+            case 'vertical':
+                if(yAxisAlignment < 0.0) {
+                    if(xAxisAlignment < 0.0)
+                        this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 0;
+                    else
+                        this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 0;
+                } else {
+                    if(xAxisAlignment < 0.0)
+                        this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 0;
+                    else
+                        this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 0;
+                }
+                this.overlayPanel.position[1] += (bounds.height+this.overlayPanel.size[1])*yAxisAlignment;
+                this.overlayPanel.position[0] += (this.overlayPanel.size[0]-bounds.width)*xAxisAlignment;
+                break;
+        }
+        this.overlayPanel.backgroundPanel.updateSize();
+        this.overlayPanel.updatePosition();
     }
 }
 
@@ -435,6 +445,8 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
             let index = 0;
             while(index < this.children.length && this.children[index].position[this.axis] < position)
                 ++index;
+            if(index <= 0 || index >= this.children.length)
+                return [];
             const prevChild = this.children[index-1],
                   nextChild = this.children[index],
                   prevChildOriginalPosition = prevChild.position[this.axis],
@@ -467,7 +479,7 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
             this.backgroundPanel.node.classList.add('verticalResizingHandle');
             this.backgroundPanel.node.classList.remove('horizontalResizingHandle');
         }
-        const childSizeSum = this.size[this.axis]-(this.children.length-1)*this.interChildSpacing;
+        const childSizeSum = this.size[this.axis]-(this.children.length-1)*this.interChildSpacing-this.padding[this.axis]*2;
         for(let i = 0; i < this.children.length; ++i) {
             const child = this.children[i],
                   childSize = childSizeSum*this.children[i].relativeSize;
@@ -617,8 +629,8 @@ export class TabsViewPanel extends TilingPanel {
             }, (event, moved) => {
                 let tabsViewPanel = this;
                 if(this.enableTabDragging && moved) {
-                    const position = this.tabsContainer.getRootPosition();
-                    vec2.sub(position, tabHandle.position, position);
+                    const containerPosition = this.tabsContainer.getRootPosition();
+                    vec2.sub(containerPosition, tabHandle.position, containerPosition);
                     this.root.overlays.removeChild(tabHandle);
                     const node = document.elementFromPoint(event.pointers[0].position[0], event.pointers[0].position[1]);
                     tabsViewPanel = (node) ? node.panel : undefined;
@@ -627,7 +639,7 @@ export class TabsViewPanel extends TilingPanel {
                     if(!(tabsViewPanel instanceof TabsViewPanel) || !tabsViewPanel.enableTabDragging)
                         return;
                     let index = 0;
-                    while(index < tabsViewPanel.tabsContainer.children.length && tabsViewPanel.tabsContainer.children[index].position[this.tabsContainer.axis] < position[this.tabsContainer.axis])
+                    while(index < tabsViewPanel.tabsContainer.children.length && tabsViewPanel.tabsContainer.children[index].position[this.tabsContainer.axis] < containerPosition[this.tabsContainer.axis])
                         ++index;
                     tabHandle.node.classList.remove('disabled');
                     tabsViewPanel.tabsContainer.insertChild(tabHandle, index);

@@ -153,7 +153,6 @@ export class Panel {
             };
         this.node.onmousedown = this.node.ontouchstart = (event) => {
             event.stopPropagation();
-            event.preventDefault();
             refineEvent(event);
             let primaryTouchID, zoomPointerDistance, moved = false;
             if(event.touches) {

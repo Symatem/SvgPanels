@@ -183,19 +183,19 @@ export class RootPanel extends ContainerPanel {
                 this.closeModalOverlay(overlay);
             });
         }
-        this.overlays.insertChild(overlay);
+        this.overlays.insertChildAnimated(overlay);
     }
 
     closeModalOverlay(overlay) {
-        const index = Math.max(0, this.overlays.children.indexOf(overlay));
-        while(this.overlays.children.length > index) {
+        let index = Math.max(0, this.overlays.children.indexOf(overlay));
+        if(index == 0)
+            this.centeringPanel.removeChild(this.modalOverlayBackgroundPanel);
+        for(; index < this.overlays.children.length; ++index) {
             const child = this.overlays.children[index];
             if(child.onClose)
                 child.onClose();
-            this.overlays.removeChild(child);
+            this.overlays.removeChildAnimated(child);
         }
-        if(index == 0)
-            this.centeringPanel.removeChild(this.modalOverlayBackgroundPanel);
     }
 
     toggleFullscreen() {
@@ -392,8 +392,8 @@ export class PopupMenuPanel extends ButtonPanel {
         this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 4;
         this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 4;
         this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 4;
-        const xAxisAlignment = (this.overlayPanel.position[0] < this.root.size[0]*0.5) ? 0.5 : -0.5,
-              yAxisAlignment = (this.overlayPanel.position[1] < this.root.size[1]*0.5) ? 0.5 : -0.5;
+        const xAxisAlignment = (this.overlayPanel.position[0] < 0.0) ? 0.5 : -0.5,
+              yAxisAlignment = (this.overlayPanel.position[1] < 0.0) ? 0.5 : -0.5;
         switch(this.style) {
             case 'horizontal':
                 if(xAxisAlignment < 0.0) {
@@ -438,6 +438,9 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
         this.otherAxisSizeStays = true;
         this.otherAxisAlignment = 'stretch';
         this.interChildSpacing = 3;
+        this.enableSplitAndMerge = true;
+        this.splitHandleSize = 20;
+        this.mergeSizeThreshold = 10;
         this.backgroundPanel = new RectPanel(vec2.create(), vec2.create());
         this.backgroundPanel.registerPointerEvents((event) => {
             const dragOrigin = event.pointers[0].position,
@@ -445,6 +448,23 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
             let index = 0;
             while(index < this.children.length && this.children[index].position[this.axis] < position)
                 ++index;
+            const sizeOtherAxis = (this.size[1-this.axis]-this.padding[this.axis])*0.5,
+                  insertAfter = dragOrigin[1-this.axis] < this.splitHandleSize-sizeOtherAxis,
+                  insertBefore = dragOrigin[1-this.axis] > sizeOtherAxis-this.splitHandleSize;
+            if(this.enableSplitAndMerge && (insertAfter || insertBefore)) {
+                if((insertBefore && index == 0) || (insertAfter && index == this.children.length))
+                    return [];
+                const childToSplit = this.children[(insertBefore) ? index-1 : index];
+                childToSplit.size[this.axis] -= this.interChildSpacing;
+                childToSplit.updateSize();
+                const childToInsert = new PanePanel(vec2.create(), vec2.create());
+                childToInsert.relativeSize = 0.0;
+                this.insertChild(childToInsert, index++);
+                this.normalizeRelativeSizes();
+                this.recalculateLayout();
+                if(insertBefore)
+                    --index;
+            }
             if(index <= 0 || index >= this.children.length)
                 return [];
             const prevChild = this.children[index-1],
@@ -467,6 +487,25 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
                 nextChild.updateSize();
                 prevChild.relativeSize = relativeSizeSum*prevChild.size[this.axis]/absoluteSizeSum;
                 nextChild.relativeSize = relativeSizeSum-prevChild.relativeSize;
+            }, (event, moved) => {
+                const smallerChild = (prevChild.relativeSize < nextChild.relativeSize) ? prevChild : nextChild;
+                if(this.enableSplitAndMerge && moved && smallerChild.size[this.axis] < this.mergeSizeThreshold) {
+                    const otherChild = (smallerChild == nextChild) ? prevChild : nextChild;
+                    otherChild.size[this.axis] += smallerChild.size[this.axis]+this.interChildSpacing;
+                    otherChild.updateSize();
+                    otherChild.position[this.axis] += (smallerChild.size[this.axis]+this.interChildSpacing)*(smallerChild == nextChild ? 0.5 : -0.5);
+                    otherChild.updatePosition();
+                    this.removeChild(smallerChild);
+                    if(this.children.length == 1) {
+                        const child = this.children[0],
+                              parent = this.parent,
+                              index = parent.children.indexOf(this);
+                        super.removeChild(child);
+                        parent.insertChild(child, index);
+                        parent.removeChild(this);
+                        parent.recalculateLayout();
+                    }
+                }
             }];
         }, undefined, this.backgroundPanel.node);
     }

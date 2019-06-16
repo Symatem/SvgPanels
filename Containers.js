@@ -431,6 +431,117 @@ export class PopupMenuPanel extends ButtonPanel {
     }
 }
 
+export class ToolbarPanel extends TilingPanel {
+    constructor(position) {
+        super(position, vec2.create());
+        this.axis = 0;
+        this.sizeAlongAxis = -1;
+        this.padding[0] = 10;
+        this.shortcuts = {};
+        document.addEventListener('keydown', this.dispatch.bind(this, 'keydown'));
+        this.insertChild(new Panel(vec2.create(), vec2.create()));
+    }
+
+    dispatch(handler, event) {
+        const node = document.querySelector('svg:hover');
+        if(!node)
+            return;
+        if(!this[handler](node.panel, event))
+            return;
+        event.stopPropagation();
+        event.preventDefault();
+    }
+
+    keydown(panel, event) {
+        const candidate = this.shortcuts[event.keyCode];
+        if(!candidate)
+            return false;
+        for(const key in candidate.modifiers)
+            if(event[key] != candidate.modifiers[key])
+                return false;
+        if(candidate.action)
+            candidate.action();
+        return true;
+    }
+
+    addTopLevelMenus(childPanels) {
+        for(const childPanel of childPanels) {
+            this.insertChild(childPanel, -2);
+            childPanel.style = 'vertical';
+            childPanel.recalculateLayout();
+        }
+        this.recalculateLayout();
+    }
+
+    addDropDownMenu(contentPanel, childPanels) {
+        const buttonPanel = new PopupMenuPanel(vec2.create(), undefined, new TilingPanel(vec2.create(), vec2.create()), 'toolbarMenuButton');
+        buttonPanel.style = 'horizontal';
+        if(typeof contentPanel == 'string')
+            contentPanel = new LabelPanel(vec2.create(), contentPanel);
+        buttonPanel.insertChild(contentPanel);
+        buttonPanel.padding[0] = 10;
+        buttonPanel.overlayPanel.padding = vec2.fromValues(0, 4);
+        buttonPanel.overlayPanel.axis = 1;
+        buttonPanel.overlayPanel.otherAxisAlignment = 'stretch';
+        for(const childPanel of childPanels) {
+            buttonPanel.overlayPanel.insertChild(childPanel);
+            childPanel.padding[0] = 10;
+            childPanel.recalculateLayout();
+            childPanel.sizeAlongAxis = 1;
+            if(childPanel.children.length < 2)
+                childPanel.insertChild(new Panel(vec2.create(), vec2.create()));
+        }
+        buttonPanel.overlayPanel.recalculateLayout();
+        return buttonPanel;
+    }
+
+    addMenuButton(contentPanel, action, shortCut='') {
+        const actionHandler = () => {
+            this.root.closeModalOverlay();
+            if(action)
+                action();
+        };
+        const buttonPanel = new ButtonPanel(vec2.create(), actionHandler, 'toolbarMenuButton');
+        buttonPanel.axis = 0;
+        if(typeof contentPanel == 'string')
+            contentPanel = new LabelPanel(vec2.create(), contentPanel);
+        buttonPanel.insertChild(contentPanel);
+        buttonPanel.insertChild(new Panel(vec2.create(), vec2.create()));
+        if(shortCut.length > 0) {
+            buttonPanel.insertChild(new Panel(vec2.create(), vec2.fromValues(10, 0)));
+            buttonPanel.insertChild(new LabelPanel(vec2.create(), shortCut));
+            buttonPanel.shortCut = {'action': actionHandler, 'modifiers': {}};
+            const codes = {'⇧': 'shiftKey', '⌘': 'metaKey', '⎇': 'altKey', '⌥': 'altKey', '^': 'ctrlKey', '⎈': 'ctrlKey', '↵': 13, '⏎': 13, '⌫': 8, '↹': 9, '␣': 32, '←': 37, '↑': 38, '→': 39, '↓': 40}; // '↖', '↘', '⇞', '⇟'
+            for(let i = 0; i < shortCut.length; ++i) {
+                const code = codes[shortCut[i]];
+                if(!code)
+                    buttonPanel.shortCut.keyCode = shortCut.charCodeAt(i);
+                else if(typeof code == 'number')
+                    buttonPanel.shortCut.keyCode = code;
+                else if(typeof code == 'string')
+                    buttonPanel.shortCut.modifiers[code] = true;
+            }
+            this.shortcuts[buttonPanel.shortCut.keyCode] = buttonPanel.shortCut;
+        }
+        return buttonPanel;
+    }
+
+    unregisterShortcuts(panel) {
+        if(panel.shortCut)
+            delete this.shortcuts[panel.shortCut.keyCode];
+        if(panel.overlayPanel)
+            for(const child of panel.overlayPanel.children)
+                this.unregisterShortcuts(child);
+    }
+
+    removeChild(child) {
+        if(!super.removeChild(child))
+            return false;
+        this.unregisterShortcuts(child);
+        return true;
+    }
+}
+
 export class ConfigurableSplitViewPanel extends TilingPanel {
     constructor(position, size) {
         super(position, size);

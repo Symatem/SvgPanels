@@ -138,6 +138,10 @@ export class TextFieldPanel extends XhtmlPanel {
     constructor(position, size) {
         super(position, size, 'input');
         this.embeddedNode.setAttribute('type', 'text');
+        this.embeddedNode.addEventListener('keydown', (event) => {
+            if(!event.metaKey && !event.ctrlKey)
+                event.stopPropagation();
+        });
     }
 
     get text() {
@@ -152,6 +156,10 @@ export class TextFieldPanel extends XhtmlPanel {
 export class TextAreaPanel extends XhtmlPanel {
     constructor(position, size) {
         super(position, size, 'textarea');
+        this.embeddedNode.addEventListener('keydown', (event) => {
+            if(!event.metaKey && !event.ctrlKey)
+                event.stopPropagation();
+        });
     }
 
     get text() {

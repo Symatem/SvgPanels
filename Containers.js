@@ -464,20 +464,9 @@ export class ToolbarPanel extends TilingPanel {
         return true;
     }
 
-    addTopLevelMenus(childPanels) {
-        for(const childPanel of childPanels) {
-            this.insertChild(childPanel, -2);
-            childPanel.style = 'vertical';
-            childPanel.recalculateLayout();
-        }
-        this.recalculateLayout();
-    }
-
-    addDropDownMenu(contentPanel, childPanels) {
+    generateDropDownMenu(contentPanel, childPanels) {
         const buttonPanel = new PopupMenuPanel(vec2.create(), undefined, new TilingPanel(vec2.create(), vec2.create()), 'toolbarMenuButton');
         buttonPanel.style = 'horizontal';
-        if(typeof contentPanel == 'string')
-            contentPanel = new LabelPanel(vec2.create(), contentPanel);
         buttonPanel.insertChild(contentPanel);
         buttonPanel.padding[0] = 10;
         buttonPanel.overlayPanel.padding = vec2.fromValues(0, 4);
@@ -495,7 +484,7 @@ export class ToolbarPanel extends TilingPanel {
         return buttonPanel;
     }
 
-    addMenuButton(contentPanel, action, shortCut='') {
+    generateMenuButton(contentPanel, shortCut, action) {
         const actionHandler = () => {
             this.root.closeModalOverlay();
             if(action)
@@ -503,11 +492,9 @@ export class ToolbarPanel extends TilingPanel {
         };
         const buttonPanel = new ButtonPanel(vec2.create(), actionHandler, 'toolbarMenuButton');
         buttonPanel.axis = 0;
-        if(typeof contentPanel == 'string')
-            contentPanel = new LabelPanel(vec2.create(), contentPanel);
         buttonPanel.insertChild(contentPanel);
         buttonPanel.insertChild(new Panel(vec2.create(), vec2.create()));
-        if(shortCut.length > 0) {
+        if(shortCut) {
             buttonPanel.insertChild(new Panel(vec2.create(), vec2.fromValues(10, 0)));
             buttonPanel.insertChild(new LabelPanel(vec2.create(), shortCut));
             buttonPanel.shortCut = {'action': actionHandler, 'modifiers': {}};
@@ -524,6 +511,27 @@ export class ToolbarPanel extends TilingPanel {
             this.shortcuts[buttonPanel.shortCut.keyCode] = buttonPanel.shortCut;
         }
         return buttonPanel;
+    }
+
+    addEntry(menuEntry, topLevel) {
+        let content = menuEntry.content;
+        if(typeof content == 'string')
+            content = new LabelPanel(vec2.create(), content);
+        const buttonPanel = (menuEntry.children)
+            ? this.generateDropDownMenu(content, menuEntry.children.map(child => this.addEntry(child)))
+            : this.generateMenuButton(content, menuEntry.shortCut, menuEntry.action);
+        if(topLevel) {
+            this.insertChild(buttonPanel, -2);
+            buttonPanel.style = 'vertical';
+            buttonPanel.recalculateLayout();
+        }
+        return buttonPanel;
+    }
+
+    addEntries(menuEntries) {
+        for(const menuEntry of menuEntries)
+            this.addEntry(menuEntry, true);
+        this.recalculateLayout();
     }
 
     unregisterShortcuts(panel) {

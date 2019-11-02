@@ -50,6 +50,11 @@ export class ContainerPanel extends Panel {
             newIndex += this.children.length+1;
         if(!child || (child.parent && child.parent != this) || newIndex < 0)
             return false;
+        if(child.scheduledRemoval) {
+            child.animateVisibilityTo(true);
+            window.clearTimeout(child.scheduledRemoval);
+            delete child.scheduledRemoval;
+        }
         let oldIndex;
         if(child.parent == this) {
             oldIndex = this.children.indexOf(child);
@@ -91,10 +96,11 @@ export class ContainerPanel extends Panel {
     }
 
     removeChildAnimated(child) {
-        if(child.parent != this)
+        if(child.parent != this || child.scheduledRemoval)
             return false;
         child.animateVisibilityTo(false);
-        window.setTimeout(() => {
+        child.scheduledRemoval = window.setTimeout(() => {
+            delete child.scheduledRemoval;
             this.removeChild(child);
             this.recalculateLayout();
         }, 250);

@@ -300,6 +300,14 @@ export class PanePanel extends ClippingViewPanel {
         this.backgroundPanel.node.classList.add('pane');
         this.backgroundPanel.cornerRadius = 5;
     }
+
+    updateSize() {
+        super.updateSize();
+        for(const child of this.children) {
+            vec2.copy(child.size, this.size);
+            child.updateSize();
+        }
+    }
 }
 
 export class TilingPanel extends ContainerPanel {
@@ -740,7 +748,7 @@ export class TabsViewPanel extends TilingPanel {
             this.content = (this.tabsContainer.activeButton) ? this.tabsContainer.activeButton.content : undefined;
             if(this.content)
                 this.body.insertChild(this.content);
-            this.body.recalculateLayout();
+            this.body.updateSize();
         };
         this.body = new PanePanel(vec2.create(), vec2.create());
         this.insertChild(this.body);
@@ -956,14 +964,15 @@ export class ScrollViewPanel extends InfiniteViewPanel {
     setContentTransformation(translation, scale) {
         for(let i = 0; i < 2; ++i) {
             const contentSize = this.content.size[i]*scale,
+                  contentSizeFactor = (contentSize == 0.0) ? 1.0 : 1.0/contentSize,
                   maxTranslation = Math.max(0.0, 0.5*(contentSize-this.size[i]));
             translation[i] = Math.max(-maxTranslation, Math.min(translation[i], maxTranslation));
             this.scrollBars[i].maxLength = this.size[i]-this.scrollBarWidth*2.0;
-            this.scrollBars[i].position[i] = -0.5*this.scrollBarWidth-this.scrollBars[i].maxLength*translation[i]/contentSize;
+            this.scrollBars[i].position[i] = -0.5*this.scrollBarWidth-this.scrollBars[i].maxLength*translation[i]*contentSizeFactor;
             this.scrollBars[i].position[1-i] = 0.5*this.size[1-i]-this.scrollBarWidth;
             this.scrollBars[i].updatePosition();
             this.scrollBars[i].cornerRadius = this.scrollBarWidth*0.5;
-            this.scrollBars[i].size[i] = this.scrollBars[i].maxLength*Math.min(1.0, this.size[i]/contentSize);
+            this.scrollBars[i].size[i] = this.scrollBars[i].maxLength*Math.min(1.0, this.size[i]*contentSizeFactor);
             this.scrollBars[i].size[1-i] = this.scrollBarWidth;
             this.scrollBars[i].updateSize();
             if(this.scrollBars[i].showIf == 'always' || (this.scrollBars[i].showIf == 'overflow' && this.scrollBars[i].size[i] < this.scrollBars[i].maxLength))

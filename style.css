@@ -16,7 +16,7 @@
     animation: fadeOut 0.25s ease-in-out forwards;
 }
 
-text,image,.disabled,.fadeOut,.selectionRect,.sliderBar {
+image,.disabled,.fadeOut,.selectionRect,.sliderBar {
     pointer-events: none;
 }
 
@@ -101,7 +101,7 @@ svg {
     fill: #424242;
 }
 
-.popupOverlay {
+.overlayMenu {
     fill: rgba(26, 26, 26, 0.937);
 }
 
@@ -143,15 +143,15 @@ rect.button:active {
     fill: #5680C2;
 }
 
-rect.popupMenuButton {
+rect.overlayMenuButton {
     fill: #2C2C2C;
 }
 
-rect.popupMenuButton:hover {
+rect.overlayMenuButton:hover {
     fill: #3B3B3B;
 }
 
-rect.popupMenuButton:active,rect.popupMenuButton.active {
+rect.overlayMenuButton:active,rect.overlayMenuButton.active {
     fill: #696E76;
 }
 

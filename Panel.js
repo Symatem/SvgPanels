@@ -203,10 +203,48 @@ export class Panel {
         };
     }
 
-    registerClickEvent(onClick) {
-        this.registerPointerEvents(() => {
-            return [undefined, (event, moved) => {
-                if(!moved)
+    registerClickOrDragEvent(onClick, onDragStart) {
+        this.registerPointerEvents((event) => {
+            let item, root = this.root;
+            const position = this.getRootPosition();
+            vec2.sub(position, position, event.pointers[0].position);
+            return [(event, moved) => {
+                if(!moved && onDragStart) {
+                    item = onDragStart();
+                    item.node.classList.add('disabled');
+                    root.overlays.insertChild(item);
+                }
+                if(item) {
+                    vec2.add(item.position, position, event.pointers[0].position);
+                    item.updatePosition();
+                    document.body.style.cursor = 'no-drop';
+                    let panel = document.elementFromPoint(event.pointers[0].position[0], event.pointers[0].position[1]).panel;
+                    while(panel) {
+                        if(panel.onCanDrop && panel.onDrop) {
+                            if(panel.onCanDrop(item))
+                                document.body.style.cursor = 'alias';
+                            break;
+                        }
+                        panel = panel.parent;
+                    }
+                }
+            }, (event, moved) => {
+                if(moved) {
+                    if(item) {
+                        document.body.style.cursor = '';
+                        item.node.classList.remove('disabled');
+                        this.root.overlays.removeChild(item);
+                        let panel = document.elementFromPoint(event.pointers[0].position[0], event.pointers[0].position[1]).panel;
+                        while(panel) {
+                            if(panel.onCanDrop && panel.onDrop) {
+                                if(panel.onCanDrop(item))
+                                    panel.onDrop(item);
+                                break;
+                            }
+                            panel = panel.parent;
+                        }
+                    }
+                } else if(onClick)
                     onClick();
             }];
         });

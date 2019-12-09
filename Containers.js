@@ -185,7 +185,7 @@ export class RootPanel extends ContainerPanel {
     openModalOverlay(overlay) {
         if(!this.modalOverlayBackgroundPanel.parent) {
             this.centeringPanel.insertChild(this.modalOverlayBackgroundPanel, -2);
-            this.modalOverlayBackgroundPanel.registerClickEvent((event) => {
+            this.modalOverlayBackgroundPanel.registerClickOrDragEvent((event) => {
                 this.closeModalOverlay(overlay);
             });
         }
@@ -256,7 +256,7 @@ export class CheckboxPanel extends ContainerPanel {
         this.rectPanel = new RectPanel(vec2.create(), this.size);
         this.insertChild(this.rectPanel);
         this.rectPanel.cornerRadius = 2;
-        this.registerClickEvent(() => {
+        this.registerClickOrDragEvent(() => {
             this.checked = !this.checked;
             if(onChange)
                 onChange();
@@ -370,16 +370,22 @@ export class ButtonPanel extends TilingPanel {
         super(position, vec2.create());
         this.padding = vec2.fromValues(4, 2);
         if(onClick)
-            this.registerClickEvent(onClick);
+            this.registerClickOrDragEvent(onClick);
         this.backgroundPanel = backgroundPanel;
         if(cssClass)
             this.backgroundPanel.node.classList.add(cssClass);
         this.backgroundPanel.cornerRadius = (cssClass == 'toolbarMenuButton') ? 0 : 4;
     }
+
+    insertChild(child, newIndex=-1) {
+        if(child instanceof LabelPanel)
+            child.node.classList.add('disabled');
+        return super.insertChild(child, newIndex);
+    }
 }
 
-export class PopupMenuPanel extends ButtonPanel {
-    constructor(position, onOpen, overlayPanel=new AdaptiveSizeContainerPanel(vec2.create()), cssClass='popupMenuButton') {
+export class OverlayMenuPanel extends ButtonPanel {
+    constructor(position, onOpen, overlayPanel=new AdaptiveSizeContainerPanel(vec2.create()), cssClass='overlayMenuButton') {
         super(position, () => {
             if(this.backgroundPanel.node.classList.contains('active'))
                 this.root.closeModalOverlay(this.overlayPanel);
@@ -393,7 +399,7 @@ export class PopupMenuPanel extends ButtonPanel {
         }, cssClass);
         this.overlayPanel = overlayPanel;
         this.overlayPanel.backgroundPanel = new SpeechBalloonPanel(vec2.create(), vec2.create());
-        this.overlayPanel.backgroundPanel.node.classList.add('popupOverlay');
+        this.overlayPanel.backgroundPanel.node.classList.add('overlayMenu');
         this.overlayPanel.onClose = () => {
             this.backgroundPanel.node.classList.remove('active');
         };
@@ -445,6 +451,23 @@ export class PopupMenuPanel extends ButtonPanel {
     }
 }
 
+export class DropDownMenuPanel extends OverlayMenuPanel {
+    constructor(position, childPanels, cssClass) {
+        super(position, undefined, new TilingPanel(vec2.create(), vec2.create()), cssClass);
+        this.style = (cssClass == 'toolbarMenuButton') ? 'horizontal' : 'vertical';
+        this.padding[0] = 10;
+        this.overlayPanel.padding = vec2.fromValues(0, 4);
+        this.overlayPanel.axis = 1;
+        this.overlayPanel.otherAxisAlignment = 'stretch';
+        for(const childPanel of childPanels) {
+            this.overlayPanel.insertChild(childPanel);
+            childPanel.padding[0] = 10;
+            childPanel.recalculateLayout();
+        }
+        this.overlayPanel.recalculateLayout();
+    }
+}
+
 export class ToolbarPanel extends TilingPanel {
     constructor(position) {
         super(position, vec2.create());
@@ -479,23 +502,15 @@ export class ToolbarPanel extends TilingPanel {
     }
 
     generateDropDownMenu(contentPanel, childPanels) {
-        const buttonPanel = new PopupMenuPanel(vec2.create(), undefined, new TilingPanel(vec2.create(), vec2.create()), 'toolbarMenuButton');
-        buttonPanel.style = 'horizontal';
-        buttonPanel.insertChild(contentPanel);
-        buttonPanel.padding[0] = 10;
-        buttonPanel.overlayPanel.padding = vec2.fromValues(0, 4);
-        buttonPanel.overlayPanel.axis = 1;
-        buttonPanel.overlayPanel.otherAxisAlignment = 'stretch';
+        const dropDownMenuPanel = new DropDownMenuPanel(vec2.create(), childPanels, 'toolbarMenuButton');
+        dropDownMenuPanel.insertChild(contentPanel);
         for(const childPanel of childPanels) {
-            buttonPanel.overlayPanel.insertChild(childPanel);
-            childPanel.padding[0] = 10;
-            childPanel.recalculateLayout();
             childPanel.sizeAlongAxis = 1;
             if(childPanel.children.length < 2)
                 childPanel.insertChild(new Panel(vec2.create(), vec2.create()));
+            childPanel.recalculateLayout();
         }
-        buttonPanel.overlayPanel.recalculateLayout();
-        return buttonPanel;
+        return dropDownMenuPanel;
     }
 
     generateMenuButton(contentPanel, shortCut, action) {
@@ -512,7 +527,11 @@ export class ToolbarPanel extends TilingPanel {
             buttonPanel.insertChild(new Panel(vec2.create(), vec2.fromValues(10, 0)));
             buttonPanel.insertChild(new LabelPanel(vec2.create(), shortCut));
             buttonPanel.shortCut = {'action': actionHandler, 'modifiers': {}};
-            const codes = {'⇧': 'shiftKey', '⌘': 'metaKey', '⎇': 'altKey', '⌥': 'altKey', '^': 'ctrlKey', '⎈': 'ctrlKey', '↵': 13, '⏎': 13, '⌫': 8, '↹': 9, '␣': 32, '←': 37, '↑': 38, '→': 39, '↓': 40}; // '↖', '↘', '⇞', '⇟'
+            const codes = {
+                '⇧': 'shiftKey', '⌘': 'metaKey', '⎇': 'altKey', '⌥': 'altKey', '^': 'ctrlKey', '⎈': 'ctrlKey',
+                '↵': 13, '⏎': 13, '⌫': 8, '↹': 9, '␣': 32, '←': 37, '↑': 38, '→': 39, '↓': 40,
+                // '↖': , '↘': , '⇞': , '⇟':
+            };
             for(let i = 0; i < shortCut.length; ++i) {
                 const code = codes[shortCut[i]];
                 if(!code)
@@ -691,7 +710,7 @@ export class RadioButtonsPanel extends TilingPanel {
 
     insertChild(child, newIndex=-1) {
         if(!child.node.onmousedown && !child.node.ontouchstart)
-            child.registerClickEvent(() => {
+            child.registerClickOrDragEvent(() => {
                 this.activeButton = child;
                 if(this.onChange)
                     this.onChange();
@@ -731,7 +750,7 @@ export class TabsViewPanel extends TilingPanel {
         this.enableTabDragging = false;
         this.header = new ClippingViewPanel(vec2.create(), vec2.create());
         this.insertChild(this.header);
-        this.header.backgroundPanel.registerClickEvent(() => {
+        this.header.backgroundPanel.registerClickOrDragEvent(() => {
             if(!this.tabsContainer.activeButton)
                 return;
             this.tabsContainer.activeButton = undefined;
@@ -750,6 +769,19 @@ export class TabsViewPanel extends TilingPanel {
                 this.body.insertChild(this.content);
             this.body.updateSize();
         };
+        this.onCanDrop = (item) => {
+            return this.enableTabDragging && item instanceof ButtonPanel && item.backgroundPanel.node.classList.contains('tabHandle');
+        };
+        this.onDrop = (tabHandle) => {
+            let index = 0;
+            const containerPosition = this.tabsContainer.getRootPosition();
+            vec2.sub(containerPosition, tabHandle.position, containerPosition);
+            while(index < this.tabsContainer.children.length && this.tabsContainer.children[index].position[this.tabsContainer.axis] < containerPosition[this.tabsContainer.axis])
+                ++index;
+            this.tabsContainer.insertChild(tabHandle, index);
+            this.tabsContainer.recalculateLayout();
+            this.setActiveTab(tabHandle);
+        };
         this.body = new PanePanel(vec2.create(), vec2.create());
         this.insertChild(this.body);
     }
@@ -759,7 +791,7 @@ export class TabsViewPanel extends TilingPanel {
             this.tabsContainer.axis = 1-this.axis;
             this.tabsContainer.recalculateLayout();
             for(const tabHandle of this.tabsContainer.children) {
-                this.updateTabHanldeCorners(tabHandle);
+                this.updateTabHandleCorners(tabHandle);
                 tabHandle.backgroundPanel.updateSize();
             }
         }
@@ -768,7 +800,7 @@ export class TabsViewPanel extends TilingPanel {
         super.recalculateLayout();
     }
 
-    updateTabHanldeCorners(tabHandle) {
+    updateTabHandleCorners(tabHandle) {
         tabHandle.backgroundPanel.cornerRadiusTopLeft = tabHandle.backgroundPanel.cornerRadius;
         if(this.tabsContainer.axis == 0) {
             tabHandle.backgroundPanel.cornerRadiusTopRight = tabHandle.backgroundPanel.cornerRadius;
@@ -780,49 +812,22 @@ export class TabsViewPanel extends TilingPanel {
         tabHandle.backgroundPanel.cornerRadiusBottomRight = 0;
     }
 
+    setActiveTab(tabHandle) {
+        this.tabsContainer.activeButton = tabHandle;
+        if(this.tabsContainer.onChange)
+            this.tabsContainer.onChange();
+    }
+
     addTab() {
         const tabHandle = new ButtonPanel(vec2.create(), undefined, 'tabHandle', new SpeechBalloonPanel(vec2.create(), vec2.create()));
         this.tabsContainer.insertChild(tabHandle);
-        this.updateTabHanldeCorners(tabHandle);
+        this.updateTabHandleCorners(tabHandle);
         tabHandle.padding = vec2.fromValues(11, 3);
-        tabHandle.registerPointerEvents((event) => {
-            const position = tabHandle.getRootPosition();
-            vec2.sub(position, position, event.pointers[0].position);
-            return [(event, moved) => {
-                if(!this.enableTabDragging)
-                    return;
-                if(!moved) {
-                    tabHandle.node.classList.add('disabled');
-                    this.removeTab(tabHandle);
-                    this.root.overlays.insertChild(tabHandle);
-                }
-                vec2.add(tabHandle.position, position, event.pointers[0].position);
-                tabHandle.updatePosition();
-            }, (event, moved) => {
-                let tabsViewPanel = this;
-                if(this.enableTabDragging && moved) {
-                    const containerPosition = this.tabsContainer.getRootPosition();
-                    vec2.sub(containerPosition, tabHandle.position, containerPosition);
-                    this.root.overlays.removeChild(tabHandle);
-                    const node = document.elementFromPoint(event.pointers[0].position[0], event.pointers[0].position[1]);
-                    tabsViewPanel = (node) ? node.panel : undefined;
-                    tabsViewPanel = tabsViewPanel.getNthParent(2);
-                    tabsViewPanel = (tabsViewPanel.getNthParent(2) instanceof TabsViewPanel) ? tabsViewPanel.getNthParent(2) : tabsViewPanel;
-                    if(!(tabsViewPanel instanceof TabsViewPanel) || !tabsViewPanel.enableTabDragging)
-                        return;
-                    let index = 0;
-                    while(index < tabsViewPanel.tabsContainer.children.length && tabsViewPanel.tabsContainer.children[index].position[this.tabsContainer.axis] < containerPosition[this.tabsContainer.axis])
-                        ++index;
-                    tabHandle.node.classList.remove('disabled');
-                    tabsViewPanel.tabsContainer.insertChild(tabHandle, index);
-                    tabsViewPanel.tabsContainer.recalculateLayout();
-                }
-                if(!tabsViewPanel)
-                    return;
-                tabsViewPanel.tabsContainer.activeButton = tabHandle;
-                if(tabsViewPanel.tabsContainer.onChange)
-                    tabsViewPanel.tabsContainer.onChange();
-            }];
+        tabHandle.registerClickOrDragEvent(this.setActiveTab.bind(this, tabHandle), () => {
+            if(!this.enableTabDragging)
+                return;
+            this.removeTab(tabHandle);
+            return tabHandle;
         });
         return tabHandle;
     }

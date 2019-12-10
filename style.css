@@ -1,22 +1,4 @@
-@keyframes fadeOut {
-    0% { opacity: 1; }
-    100% { opacity: 0; }
-}
-
-@keyframes fadeIn {
-    0% { opacity: 0; }
-    100% { opacity: 1; }
-}
-
-.fadeIn {
-    animation: fadeIn 0.25s ease-in-out forwards;
-}
-
-.fadeOut {
-    animation: fadeOut 0.25s ease-in-out forwards;
-}
-
-image,.disabled,.fadeOut,.selectionRect,.sliderBar {
+.disabled,.fadeOut,.selectionRect,.sliderBar {
     pointer-events: none;
 }
 

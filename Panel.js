@@ -101,17 +101,27 @@ export class Panel {
             this.node.classList.remove('selected');
     }
 
-    get visible() {
-        return !this.node.classList.contains('fadeOut');
+    animateVisibilityTo(visible) {
+        this.visibilityAnimation = this.node.animate({'opacity': [0, 1]}, {
+            'direction': visible ? 'normal' : 'reverse',
+            'duration': 250,
+            'iterations': 1,
+            'easing': 'ease-in-out'
+        });
+        const parent = this.parent;
+        this.visibilityAnimation.onfinish = () => {
+            delete this.visibilityAnimation;
+            if(!visible) {
+                parent.removeChild(this);
+                parent.recalculateLayout();
+            }
+        };
     }
 
-    animateVisibilityTo(visible) {
-        if(visible) {
-            this.node.classList.remove('fadeOut');
-            this.node.classList.add('fadeIn');
-        } else {
-            this.node.classList.remove('fadeIn');
-            this.node.classList.add('fadeOut');
+    resetVisibilityAnimation() {
+        if(this.visibilityAnimation) {
+            this.visibilityAnimation.cancel();
+            delete this.visibilityAnimation;
         }
     }
 
@@ -123,6 +133,14 @@ export class Panel {
             this.selected = !this.selected;
         else
             this.selected = true;
+    }
+
+    static dispatchEvent(event, type, newEvent) {
+        let panel = document.elementFromPoint(event.pointers[0].position[0], event.pointers[0].position[1]).panel;
+        event = new Event(type, {'bubbles': true});
+        Object.assign(event, newEvent);
+        panel.node.dispatchEvent(event);
+        return event;
     }
 
     registerPointerEvents(onPointerStart, onZoom, referenceNode) {
@@ -217,16 +235,7 @@ export class Panel {
                 if(item) {
                     vec2.add(item.position, position, event.pointers[0].position);
                     item.updatePosition();
-                    document.body.style.cursor = 'no-drop';
-                    let panel = document.elementFromPoint(event.pointers[0].position[0], event.pointers[0].position[1]).panel;
-                    while(panel) {
-                        if(panel.onCanDrop && panel.onDrop) {
-                            if(panel.onCanDrop(item))
-                                document.body.style.cursor = 'alias';
-                            break;
-                        }
-                        panel = panel.parent;
-                    }
+                    document.body.style.cursor = Panel.dispatchEvent(event, 'mayDrop', {'item': item}).canDrop ? 'alias' : 'no-drop';
                 }
             }, (event, moved) => {
                 if(moved) {
@@ -234,15 +243,7 @@ export class Panel {
                         document.body.style.cursor = '';
                         item.node.classList.remove('disabled');
                         this.root.overlays.removeChild(item);
-                        let panel = document.elementFromPoint(event.pointers[0].position[0], event.pointers[0].position[1]).panel;
-                        while(panel) {
-                            if(panel.onCanDrop && panel.onDrop) {
-                                if(panel.onCanDrop(item))
-                                    panel.onDrop(item);
-                                break;
-                            }
-                            panel = panel.parent;
-                        }
+                        Panel.dispatchEvent(event, 'drop', {'item': item});
                     }
                 } else if(onClick)
                     onClick();

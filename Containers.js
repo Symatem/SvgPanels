@@ -46,15 +46,11 @@ export class ContainerPanel extends Panel {
     }
 
     insertChild(child, newIndex=-1) {
+        child.resetVisibilityAnimation();
         if(newIndex < 0)
             newIndex += this.children.length+1;
         if(!child || (child.parent && child.parent != this) || newIndex < 0)
             return false;
-        if(child.scheduledRemoval) {
-            child.animateVisibilityTo(true);
-            window.clearTimeout(child.scheduledRemoval);
-            delete child.scheduledRemoval;
-        }
         let oldIndex;
         if(child.parent == this) {
             oldIndex = this.children.indexOf(child);
@@ -85,6 +81,7 @@ export class ContainerPanel extends Panel {
         this.children.splice(this.children.indexOf(child), 1);
         if(child.node)
             this.node.removeChild(child.node);
+        child.resetVisibilityAnimation();
         return true;
     }
 
@@ -96,14 +93,10 @@ export class ContainerPanel extends Panel {
     }
 
     removeChildAnimated(child) {
-        if(child.parent != this || child.scheduledRemoval)
+        if(child.parent != this)
             return false;
+        child.resetVisibilityAnimation();
         child.animateVisibilityTo(false);
-        child.scheduledRemoval = window.setTimeout(() => {
-            delete child.scheduledRemoval;
-            this.removeChild(child);
-            this.recalculateLayout();
-        }, 250);
         return true;
     }
 
@@ -250,7 +243,7 @@ export class AdaptiveSizeContainerPanel extends ContainerPanel {
 }
 
 export class CheckboxPanel extends ContainerPanel {
-    constructor(position, onChange) {
+    constructor(position) {
         super(position, vec2.fromValues(12, 12));
         this.node.classList.add('checkbox');
         this.rectPanel = new RectPanel(vec2.create(), this.size);
@@ -258,8 +251,7 @@ export class CheckboxPanel extends ContainerPanel {
         this.rectPanel.cornerRadius = 2;
         this.registerClickOrDragEvent(() => {
             this.checked = !this.checked;
-            if(onChange)
-                onChange();
+            this.node.dispatchEvent(new Event('change'));
         });
         this.imagePanel = new ImagePanel(vec2.create(), vec2.fromValues(9, 9), 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNiIgaGVpZ2h0PSIyNiI+CiAgICA8cGF0aCBmaWxsPSIjRkZGIiBkPSJNMjIuNTY2NDA2IDQuNzMwNDY5TDIwLjc3MzQzOCAzLjUxMTcxOUMyMC4yNzczNDQgMy4xNzU3ODEgMTkuNTk3NjU2IDMuMzA0Njg4IDE5LjI2NTYyNSAzLjc5Njg3NUwxMC40NzY1NjMgMTYuNzU3ODEzTDYuNDM3NSAxMi43MTg3NUM2LjAxNTYyNSAxMi4yOTY4NzUgNS4zMjgxMjUgMTIuMjk2ODc1IDQuOTA2MjUgMTIuNzE4NzVMMy4zNzEwOTQgMTQuMjUzOTA2QzIuOTQ5MjE5IDE0LjY3NTc4MSAyLjk0OTIxOSAxNS4zNjMyODEgMy4zNzEwOTQgMTUuNzg5MDYzTDkuNTgyMDMxIDIyQzkuOTI5Njg4IDIyLjM0NzY1NiAxMC40NzY1NjMgMjIuNjEzMjgxIDEwLjk2ODc1IDIyLjYxMzI4MUMxMS40NjA5MzggMjIuNjEzMjgxIDExLjk1NzAzMSAyMi4zMDQ2ODggMTIuMjc3MzQ0IDIxLjgzOTg0NEwyMi44NTU0NjkgNi4yMzQzNzVDMjMuMTkxNDA2IDUuNzQyMTg4IDIzLjA2MjUgNS4wNjY0MDYgMjIuNTY2NDA2IDQuNzMwNDY5WiIvPgo8L3N2Zz4K');
         this.insertChild(this.imagePanel);
@@ -378,7 +370,7 @@ export class ButtonPanel extends TilingPanel {
     }
 
     insertChild(child, newIndex=-1) {
-        if(child instanceof LabelPanel)
+        if(child instanceof LabelPanel || child instanceof ImagePanel)
             child.node.classList.add('disabled');
         return super.insertChild(child, newIndex);
     }
@@ -416,31 +408,35 @@ export class OverlayMenuPanel extends ButtonPanel {
               yAxisAlignment = (this.overlayPanel.position[1] < 0.0) ? 0.5 : -0.5;
         switch(this.style) {
             case 'horizontal':
-                if(xAxisAlignment < 0.0) {
-                    if(yAxisAlignment < 0.0)
-                        this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 0;
-                    else
-                        this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 0;
-                } else {
-                    if(yAxisAlignment < 0.0)
-                        this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 0;
-                    else
-                        this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 0;
+                if(this.backgroundPanel.cornerRadius == 0) {
+                    if(xAxisAlignment < 0.0) {
+                        if(yAxisAlignment < 0.0)
+                            this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 0;
+                        else
+                            this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 0;
+                    } else {
+                        if(yAxisAlignment < 0.0)
+                            this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 0;
+                        else
+                            this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 0;
+                    }
                 }
                 this.overlayPanel.position[0] += (bounds.width+this.overlayPanel.size[0])*xAxisAlignment;
                 this.overlayPanel.position[1] += (this.overlayPanel.size[1]-bounds.height)*yAxisAlignment;
                 break;
             case 'vertical':
-                if(yAxisAlignment < 0.0) {
-                    if(xAxisAlignment < 0.0)
-                        this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 0;
-                    else
-                        this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 0;
-                } else {
-                    if(xAxisAlignment < 0.0)
-                        this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 0;
-                    else
-                        this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 0;
+                if(this.backgroundPanel.cornerRadius == 0) {
+                    if(yAxisAlignment < 0.0) {
+                        if(xAxisAlignment < 0.0)
+                            this.overlayPanel.backgroundPanel.cornerRadiusBottomRight = 0;
+                        else
+                            this.overlayPanel.backgroundPanel.cornerRadiusBottomLeft = 0;
+                    } else {
+                        if(xAxisAlignment < 0.0)
+                            this.overlayPanel.backgroundPanel.cornerRadiusTopRight = 0;
+                        else
+                            this.overlayPanel.backgroundPanel.cornerRadiusTopLeft = 0;
+                    }
                 }
                 this.overlayPanel.position[1] += (bounds.height+this.overlayPanel.size[1])*yAxisAlignment;
                 this.overlayPanel.position[0] += (this.overlayPanel.size[0]-bounds.width)*xAxisAlignment;
@@ -452,10 +448,10 @@ export class OverlayMenuPanel extends ButtonPanel {
 }
 
 export class DropDownMenuPanel extends OverlayMenuPanel {
-    constructor(position, childPanels, cssClass) {
+    constructor(position, contentPanel, childPanels, cssClass) {
         super(position, undefined, new TilingPanel(vec2.create(), vec2.create()), cssClass);
-        this.style = (cssClass == 'toolbarMenuButton') ? 'horizontal' : 'vertical';
-        this.padding[0] = 10;
+        this.contentPanel = contentPanel;
+        this.insertChild(contentPanel);
         this.overlayPanel.padding = vec2.fromValues(0, 4);
         this.overlayPanel.axis = 1;
         this.overlayPanel.otherAxisAlignment = 'stretch';
@@ -463,6 +459,15 @@ export class DropDownMenuPanel extends OverlayMenuPanel {
             this.overlayPanel.insertChild(childPanel);
             childPanel.padding[0] = 10;
             childPanel.recalculateLayout();
+        }
+        if(cssClass == 'toolbarMenuButton') {
+            this.style = 'horizontal';
+            this.padding[0] = 10;
+        } else {
+            this.style = 'vertical';
+            this.padding[0] = 5;
+            this.interChildSpacing = 5;
+            this.insertChild(new ImagePanel(vec2.create(), vec2.fromValues(10, 10), 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMCAxNSI+PHBhdGggc3R5bGU9ImZpbGw6bm9uZTtzdHJva2U6d2hpdGU7c3Ryb2tlLXdpZHRoOjVweDsiIGQ9Ik0zIDVsMTIgMTBsMTIgLTEwIi8+PC9zdmc+'));
         }
         this.overlayPanel.recalculateLayout();
     }
@@ -502,8 +507,7 @@ export class ToolbarPanel extends TilingPanel {
     }
 
     generateDropDownMenu(contentPanel, childPanels) {
-        const dropDownMenuPanel = new DropDownMenuPanel(vec2.create(), childPanels, 'toolbarMenuButton');
-        dropDownMenuPanel.insertChild(contentPanel);
+        const dropDownMenuPanel = new DropDownMenuPanel(vec2.create(), contentPanel, childPanels, 'toolbarMenuButton');
         for(const childPanel of childPanels) {
             childPanel.sizeAlongAxis = 1;
             if(childPanel.children.length < 2)
@@ -703,17 +707,15 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
 }
 
 export class RadioButtonsPanel extends TilingPanel {
-    constructor(position, size, onChange) {
+    constructor(position, size) {
         super(position, size);
-        this.onChange = onChange;
     }
 
     insertChild(child, newIndex=-1) {
         if(!child.node.onmousedown && !child.node.ontouchstart)
             child.registerClickOrDragEvent(() => {
                 this.activeButton = child;
-                if(this.onChange)
-                    this.onChange();
+                this.node.dispatchEvent(new Event('change'));
             });
         return super.insertChild(child, newIndex);
     }
@@ -721,8 +723,7 @@ export class RadioButtonsPanel extends TilingPanel {
     removeChild(child) {
         if(child == this._activeButton) {
             this.activeButton = undefined;
-            if(this.onChange)
-                this.onChange();
+            this.node.dispatchEvent(new Event('change'));
         }
         return super.removeChild(child);
     }
@@ -753,35 +754,36 @@ export class TabsViewPanel extends TilingPanel {
         this.header.backgroundPanel.registerClickOrDragEvent(() => {
             if(!this.tabsContainer.activeButton)
                 return;
-            this.tabsContainer.activeButton = undefined;
-            if(this.tabsContainer.onChange)
-                this.tabsContainer.onChange();
+            this.setActiveTab(undefined);
         });
         this.tabsContainer = new RadioButtonsPanel(vec2.create(), vec2.create());
         this.header.insertChild(this.tabsContainer);
         this.tabsContainer.axis = 1-this.axis;
         this.tabsContainer.interChildSpacing = 4;
-        this.tabsContainer.onChange = () => {
+        this.tabsContainer.node.addEventListener('change', () => {
             if(this.content)
                 this.body.removeChild(this.content);
             this.content = (this.tabsContainer.activeButton) ? this.tabsContainer.activeButton.content : undefined;
             if(this.content)
                 this.body.insertChild(this.content);
             this.body.updateSize();
-        };
-        this.onCanDrop = (item) => {
-            return this.enableTabDragging && item instanceof ButtonPanel && item.backgroundPanel.node.classList.contains('tabHandle');
-        };
-        this.onDrop = (tabHandle) => {
+        }, false);
+        const acceptsDrop = (item) => this.enableTabDragging && item instanceof ButtonPanel && item.backgroundPanel.node.classList.contains('tabHandle');
+        this.node.addEventListener('mayDrop', (event) => {
+            event.canDrop = acceptsDrop(event.item);
+        }, false);
+        this.node.addEventListener('drop', (event) => {
+            if(!acceptsDrop(event.item))
+                return;
             let index = 0;
             const containerPosition = this.tabsContainer.getRootPosition();
-            vec2.sub(containerPosition, tabHandle.position, containerPosition);
+            vec2.sub(containerPosition, event.item.position, containerPosition);
             while(index < this.tabsContainer.children.length && this.tabsContainer.children[index].position[this.tabsContainer.axis] < containerPosition[this.tabsContainer.axis])
                 ++index;
-            this.tabsContainer.insertChild(tabHandle, index);
+            this.tabsContainer.insertChild(event.item, index);
             this.tabsContainer.recalculateLayout();
-            this.setActiveTab(tabHandle);
-        };
+            this.setActiveTab(event.item);
+        }, false);
         this.body = new PanePanel(vec2.create(), vec2.create());
         this.insertChild(this.body);
     }
@@ -814,8 +816,7 @@ export class TabsViewPanel extends TilingPanel {
 
     setActiveTab(tabHandle) {
         this.tabsContainer.activeButton = tabHandle;
-        if(this.tabsContainer.onChange)
-            this.tabsContainer.onChange();
+        this.tabsContainer.node.dispatchEvent(new Event('change'));
     }
 
     addTab() {
@@ -999,7 +1000,7 @@ export class ScrollViewPanel extends InfiniteViewPanel {
 }
 
 export class SliderPanel extends ContainerPanel {
-    constructor(position, size, onChange) {
+    constructor(position, size) {
         super(position, size);
         this.backgroundPanel = new RectPanel(vec2.create(), size);
         this.barPanel = new RectPanel(vec2.create(), vec2.create());
@@ -1012,8 +1013,7 @@ export class SliderPanel extends ContainerPanel {
             this.value = parseFloat(this.textFieldPanel.text);
             this.removeChild(this.textFieldPanel);
             this.recalculateLayout();
-            if(onChange)
-                onChange();
+            this.node.dispatchEvent(new Event('change'));
         };
         this.minValue = 0.0;
         this.maxValue = 1.0;
@@ -1028,8 +1028,7 @@ export class SliderPanel extends ContainerPanel {
                 this.recalculateLayout();
             }, (event, moved) => {
                 if(moved) {
-                    if(onChange)
-                        onChange();
+                    this.node.dispatchEvent(new Event('change'));
                     return;
                 }
                 this.insertChild(this.textFieldPanel);

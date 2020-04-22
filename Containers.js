@@ -68,6 +68,7 @@ export class ContainerPanel extends Panel {
                 this.node.appendChild(child.node);
             else
                 this.node.insertBefore(child.node, this.children[(newIndex == oldIndex+1) ? newIndex+1 : newIndex].node);
+            child.node.dispatchEvent(new Event('parentChanged'));
         }
         this.children.splice(newIndex, 0, child);
         return true;
@@ -79,8 +80,10 @@ export class ContainerPanel extends Panel {
         delete child.parent;
         child.root = undefined;
         this.children.splice(this.children.indexOf(child), 1);
-        if(child.node)
+        if(child.node) {
             this.node.removeChild(child.node);
+            child.node.dispatchEvent(new Event('parentChanged'));
+        }
         child.resetVisibilityAnimation();
         return true;
     }
@@ -135,26 +138,6 @@ export class RootPanel extends ContainerPanel {
         this.overlays = new ContainerPanel(vec2.create(), vec2.create());
         this.centeringPanel.insertChild(this.overlays);
         this.modalOverlayBackgroundPanel = new RectPanel(vec2.create(), this.size);
-        this.defsNode = Panel.createElement('defs', this.node);
-        const blurFilter = Panel.createElement('filter', this.defsNode);
-        blurFilter.setAttribute('id', 'blurFilter');
-        blurFilter.setAttribute('x', -10);
-        blurFilter.setAttribute('y', -10);
-        blurFilter.setAttribute('width', 20);
-        blurFilter.setAttribute('height', 20);
-        const feGaussianBlur = Panel.createElement('feGaussianBlur', blurFilter);
-        feGaussianBlur.setAttribute('in', 'SourceGraphic');
-        feGaussianBlur.setAttribute('result', 'blur');
-        feGaussianBlur.setAttribute('stdDeviation', 3);
-        const feComponentTransfer = Panel.createElement('feComponentTransfer', blurFilter);
-        feComponentTransfer.setAttribute('in', 'blur');
-        feComponentTransfer.setAttribute('result', 'brighter');
-        const feFunc = Panel.createElement('feFuncA', feComponentTransfer);
-        feFunc.setAttribute('type', 'linear');
-        feFunc.setAttribute('slope', 2);
-        const feMerge = Panel.createElement('feMerge', blurFilter);
-        Panel.createElement('feMergeNode', feMerge).setAttribute('in', 'brighter');
-        Panel.createElement('feMergeNode', feMerge).setAttribute('in', 'SourceGraphic');
         this.node.ongesturestart = this.node.ontouchstart = (event) => {
             event.preventDefault();
         };
@@ -191,8 +174,7 @@ export class RootPanel extends ContainerPanel {
             this.centeringPanel.removeChild(this.modalOverlayBackgroundPanel);
         for(; index < this.overlays.children.length; ++index) {
             const child = this.overlays.children[index];
-            if(child.onClose)
-                child.onClose();
+            child.node.dispatchEvent(new Event('close'));
             this.overlays.removeChildAnimated(child);
         }
     }
@@ -358,11 +340,12 @@ export class TilingPanel extends ContainerPanel {
 }
 
 export class ButtonPanel extends TilingPanel {
-    constructor(position, onClick, cssClass='button', backgroundPanel=new RectPanel(vec2.create(), vec2.create())) {
+    constructor(position, cssClass='button', backgroundPanel=new RectPanel(vec2.create(), vec2.create())) {
         super(position, vec2.create());
         this.padding = vec2.fromValues(4, 2);
-        if(onClick)
-            this.registerClickOrDragEvent(onClick);
+        this.registerClickOrDragEvent(() => {
+            this.node.dispatchEvent(new Event('activate'));
+        });
         this.backgroundPanel = backgroundPanel;
         if(cssClass)
             this.backgroundPanel.node.classList.add(cssClass);
@@ -377,24 +360,23 @@ export class ButtonPanel extends TilingPanel {
 }
 
 export class OverlayMenuPanel extends ButtonPanel {
-    constructor(position, onOpen, overlayPanel=new AdaptiveSizeContainerPanel(vec2.create()), cssClass='overlayMenuButton') {
-        super(position, () => {
+    constructor(position, overlayPanel=new AdaptiveSizeContainerPanel(vec2.create()), cssClass='overlayMenuButton') {
+        super(position, cssClass);
+        this.node.addEventListener('activate', (event) => {
             if(this.backgroundPanel.node.classList.contains('active'))
                 this.root.closeModalOverlay(this.overlayPanel);
             else {
                 this.backgroundPanel.node.classList.add('active');
-                if(onOpen)
-                    onOpen();
                 this.updateOverlayPosition();
                 this.root.openModalOverlay(this.overlayPanel);
             }
-        }, cssClass);
+        });
         this.overlayPanel = overlayPanel;
         this.overlayPanel.backgroundPanel = new SpeechBalloonPanel(vec2.create(), vec2.create());
         this.overlayPanel.backgroundPanel.node.classList.add('overlayMenu');
-        this.overlayPanel.onClose = () => {
+        this.overlayPanel.node.addEventListener('close', (event) => {
             this.backgroundPanel.node.classList.remove('active');
-        };
+        });
     }
 
     updateOverlayPosition() {
@@ -449,7 +431,7 @@ export class OverlayMenuPanel extends ButtonPanel {
 
 export class DropDownMenuPanel extends OverlayMenuPanel {
     constructor(position, contentPanel, childPanels, cssClass) {
-        super(position, undefined, new TilingPanel(vec2.create(), vec2.create()), cssClass);
+        super(position, new TilingPanel(vec2.create(), vec2.create()), cssClass);
         this.contentPanel = contentPanel;
         this.insertChild(contentPanel);
         this.overlayPanel.padding = vec2.fromValues(0, 4);
@@ -510,8 +492,6 @@ export class ToolbarPanel extends TilingPanel {
         const dropDownMenuPanel = new DropDownMenuPanel(vec2.create(), contentPanel, childPanels, 'toolbarMenuButton');
         for(const childPanel of childPanels) {
             childPanel.sizeAlongAxis = 1;
-            if(childPanel.children.length < 2)
-                childPanel.insertChild(new Panel(vec2.create(), vec2.create()));
             childPanel.recalculateLayout();
         }
         return dropDownMenuPanel;
@@ -523,7 +503,8 @@ export class ToolbarPanel extends TilingPanel {
             if(action)
                 action();
         };
-        const buttonPanel = new ButtonPanel(vec2.create(), actionHandler, 'toolbarMenuButton');
+        const buttonPanel = new ButtonPanel(vec2.create(), 'toolbarMenuButton');
+        buttonPanel.node.addEventListener('click', actionHandler);
         buttonPanel.axis = 0;
         buttonPanel.insertChild(contentPanel);
         buttonPanel.insertChild(new Panel(vec2.create(), vec2.create()));
@@ -533,8 +514,7 @@ export class ToolbarPanel extends TilingPanel {
             buttonPanel.shortCut = {'action': actionHandler, 'modifiers': {}};
             const codes = {
                 '⇧': 'shiftKey', '⌘': 'metaKey', '⎇': 'altKey', '⌥': 'altKey', '^': 'ctrlKey', '⎈': 'ctrlKey',
-                '↵': 13, '⏎': 13, '⌫': 8, '↹': 9, '␣': 32, '←': 37, '↑': 38, '→': 39, '↓': 40,
-                // '↖': , '↘': , '⇞': , '⇟':
+                '⌫': 8, '↹': 9, '⌧': 12, '↵': 13, '⏎': 13, '␣': 32, '⇞': 33, '⇟': 34, '↘': 35, '↖': 36, '←': 37, '↑': 38, '→': 39, '↓': 40, '⌦': 46
             };
             for(let i = 0; i < shortCut.length; ++i) {
                 const code = codes[shortCut[i]];
@@ -561,6 +541,9 @@ export class ToolbarPanel extends TilingPanel {
             this.insertChild(buttonPanel, -2);
             buttonPanel.style = 'vertical';
             buttonPanel.recalculateLayout();
+        } else if(menuEntry.children) {
+            buttonPanel.insertChild(new Panel(vec2.create(), vec2.fromValues(10, 0)));
+            buttonPanel.insertChild(new LabelPanel(vec2.create(), '▶'));
         }
         return buttonPanel;
     }
@@ -767,23 +750,20 @@ export class TabsViewPanel extends TilingPanel {
             if(this.content)
                 this.body.insertChild(this.content);
             this.body.updateSize();
-        }, false);
-        const acceptsDrop = (item) => this.enableTabDragging && item instanceof ButtonPanel && item.backgroundPanel.node.classList.contains('tabHandle');
-        this.node.addEventListener('mayDrop', (event) => {
-            event.canDrop = acceptsDrop(event.item);
-        }, false);
-        this.node.addEventListener('drop', (event) => {
-            if(!acceptsDrop(event.item))
-                return;
-            let index = 0;
-            const containerPosition = this.tabsContainer.getRootPosition();
-            vec2.sub(containerPosition, event.item.position, containerPosition);
-            while(index < this.tabsContainer.children.length && this.tabsContainer.children[index].position[this.tabsContainer.axis] < containerPosition[this.tabsContainer.axis])
-                ++index;
-            this.tabsContainer.insertChild(event.item, index);
-            this.tabsContainer.recalculateLayout();
-            this.setActiveTab(event.item);
-        }, false);
+        });
+        this.registerDropEvent(
+            (item) => this.enableTabDragging && item instanceof ButtonPanel && item.backgroundPanel.node.classList.contains('tabHandle'),
+            (item) => {
+                let index = 0;
+                const containerPosition = this.tabsContainer.getRootPosition();
+                vec2.sub(containerPosition, item.position, containerPosition);
+                while(index < this.tabsContainer.children.length && this.tabsContainer.children[index].position[this.tabsContainer.axis] < containerPosition[this.tabsContainer.axis])
+                    ++index;
+                this.tabsContainer.insertChild(item, index);
+                this.tabsContainer.recalculateLayout();
+                this.setActiveTab(item);
+            }
+        );
         this.body = new PanePanel(vec2.create(), vec2.create());
         this.insertChild(this.body);
     }
@@ -820,7 +800,7 @@ export class TabsViewPanel extends TilingPanel {
     }
 
     addTab() {
-        const tabHandle = new ButtonPanel(vec2.create(), undefined, 'tabHandle', new SpeechBalloonPanel(vec2.create(), vec2.create()));
+        const tabHandle = new ButtonPanel(vec2.create(), 'tabHandle', new SpeechBalloonPanel(vec2.create(), vec2.create()));
         this.tabsContainer.insertChild(tabHandle);
         this.updateTabHandleCorners(tabHandle);
         tabHandle.padding = vec2.fromValues(11, 3);
@@ -842,10 +822,10 @@ export class TabsViewPanel extends TilingPanel {
 }
 
 export class InfiniteViewPanel extends ClippingViewPanel {
-    constructor(position, size) {
+    constructor(position, size, contentPanel=new AdaptiveSizeContainerPanel(vec2.create())) {
         super(position, size);
-        this.content = new AdaptiveSizeContainerPanel(vec2.create());
-        this.insertChild(this.content);
+        this.contentPanel = contentPanel;
+        this.insertChild(this.contentPanel);
         this.contentTransform = mat2d.create();
         this.inverseContentTransform = mat2d.create();
         this.velocity = vec2.create();
@@ -871,7 +851,7 @@ export class InfiniteViewPanel extends ClippingViewPanel {
                     const bounds = this.selectionRect.getBounds();
                     vec2.transformMat2d(bounds[0], bounds[0], this.inverseContentTransform);
                     vec2.transformMat2d(bounds[1], bounds[1], this.inverseContentTransform);
-                    this.content.selectChildrenInside(bounds[0], bounds[1], event.modifierKey);
+                    this.contentPanel.selectChildrenInside(bounds[0], bounds[1], event.modifierKey);
                     this.removeChildAnimated(this.selectionRect);
                     delete this.selectionRect;
                 }];
@@ -883,7 +863,7 @@ export class InfiniteViewPanel extends ClippingViewPanel {
                     prevTimestamp = performance.now();
                 return [(event, moved) => {
                     if(!moved)
-                        this.startedMoving();
+                        this.node.dispatchEvent(new Event('startedmoving'));
                     vec2.sub(translation, event.pointers[0].position, dragOrigin);
                     vec2.add(translation, translation, originalTranslation);
                     this.setContentTransformation(translation, this.contentScale);
@@ -895,7 +875,7 @@ export class InfiniteViewPanel extends ClippingViewPanel {
                     prevTimestamp = timestamp;
                 }, (event, moved) => {
                     if(moved)
-                        this.stoppedMoving();
+                        this.node.dispatchEvent(new Event('stoppedmoving'));
                     else
                         this.setAllChildrenSelected(false);
                 }];
@@ -914,9 +894,6 @@ export class InfiniteViewPanel extends ClippingViewPanel {
         }, this.backgroundPanel.node);
     }
 
-    startedMoving() {}
-    stoppedMoving() {}
-
     get contentTranslation() {
         return vec2.fromValues(this.contentTransform[4], this.contentTransform[5]);
     }
@@ -928,13 +905,14 @@ export class InfiniteViewPanel extends ClippingViewPanel {
     setContentTransformation(translation, scale) {
         mat2d.set(this.contentTransform, scale, 0.0, 0.0, scale, translation[0], translation[1]);
         mat2d.invert(this.inverseContentTransform, this.contentTransform);
-        this.content.node.setAttribute('transform', 'translate('+translation[0]+', '+translation[1]+') scale('+scale+')');
+        this.contentPanel.node.setAttribute('transform', 'translate('+translation[0]+', '+translation[1]+') scale('+scale+')');
+        this.node.dispatchEvent(new Event('move'));
     }
 }
 
 export class ScrollViewPanel extends InfiniteViewPanel {
-    constructor(position, size) {
-        super(position, size);
+    constructor(position, size, contentPanel) {
+        super(position, size, contentPanel);
         this.scrollBarWidth = 5;
         this.scrollBars = [];
         for(let i = 0; i < 2; ++i) {
@@ -948,7 +926,7 @@ export class ScrollViewPanel extends InfiniteViewPanel {
                       translation = this.contentTranslation;
                 return [(event, moved) => {
                     const position = originalPosition+event.pointers[0].position[i]-dragOrigin[i];
-                    translation[i] = 0.5*this.scrollBarWidth-position/scrollBar.maxLength*this.content.size[i]*this.contentScale;
+                    translation[i] = 0.5*this.scrollBarWidth-position/scrollBar.maxLength*this.contentPanel.size[i]*this.contentScale;
                     this.setContentTransformation(translation, this.contentScale);
                 }];
             });
@@ -969,7 +947,7 @@ export class ScrollViewPanel extends InfiniteViewPanel {
 
     setContentTransformation(translation, scale) {
         for(let i = 0; i < 2; ++i) {
-            const contentSize = this.content.size[i]*scale,
+            const contentSize = this.contentPanel.size[i]*scale,
                   contentSizeFactor = (contentSize == 0.0) ? 1.0 : 1.0/contentSize,
                   maxTranslation = Math.max(0.0, 0.5*(contentSize-this.size[i]));
             translation[i] = Math.max(-maxTranslation, Math.min(translation[i], maxTranslation));

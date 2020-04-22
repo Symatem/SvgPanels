@@ -3,7 +3,7 @@
 }
 
 .selected {
-    filter: url(#blurFilter);
+    fill: rgb(200, 220, 255);
 }
 
 .horizontalResizingHandle {
@@ -98,6 +98,7 @@ svg {
 
 textarea,input[type="text"] {
     background: #1F1F1F;
+    cursor: inherit;
 }
 
 textarea:hover,input[type="text"]:hover {

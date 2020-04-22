@@ -250,4 +250,18 @@ export class Panel {
             }];
         });
     }
+
+    registerDropEvent(acceptsDrop, onDrop) {
+        this.node.addEventListener('mayDrop', (event) => {
+            if(!acceptsDrop(event.item))
+                return;
+            event.canDrop = true;
+            event.stopPropagation();
+        });
+        this.node.addEventListener('drop', (event) => {
+            if(!acceptsDrop(event.item))
+                return;
+            onDrop(event.item);
+        });
+    }
 }

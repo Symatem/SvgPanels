@@ -123,6 +123,7 @@ export class XhtmlPanel extends Panel {
         this.node.appendChild(this.bodyElement);
         this.embeddedNode = document.createElementNS('http://www.w3.org/1999/xhtml', tag);
         this.bodyElement.appendChild(this.embeddedNode);
+        this.bodyElement.panel = this.embeddedNode.panel = this;
     }
 
     updateSize() {
@@ -163,11 +164,11 @@ export class TextAreaPanel extends XhtmlPanel {
     }
 
     get text() {
-        return this.embeddedNode.textContent;
+        return this.embeddedNode.value;
     }
 
     set text(text) {
-        this.embeddedNode.textContent = text;
+        this.embeddedNode.value = text;
     }
 }
 

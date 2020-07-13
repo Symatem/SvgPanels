@@ -2,8 +2,25 @@
     pointer-events: none;
 }
 
-.selected {
+text.selected {
     fill: rgb(200, 220, 255);
+}
+
+circle.selected,rect.selected,path.selected {
+    stroke: rgb(200, 220, 255);
+}
+
+.focused {
+    filter: url(#blurFilter);
+}
+
+circle.focused,rect.focused,path.focused {
+    stroke: rgb(255, 255, 220);
+}
+
+textarea.focused,input[type="text"].focused {
+    border: 1px solid rgb(255, 255, 220);
+    padding: 2px;
 }
 
 .horizontalResizingHandle {
@@ -42,14 +59,7 @@ foreignObject > body > * {
 
 textarea,input[type="text"] {
     padding: 3px;
-}
-
-input[type="text"]:focus {
-    outline: 0;
-}
-
-textarea,input[type="text"] {
-	resize: none;
+    resize: none;
     border: none;
 }
 
@@ -107,6 +117,7 @@ textarea:hover,input[type="text"]:hover {
 
 textarea:focus,input[type="text"]:focus {
     background: #808080;
+    outline: 0;
 }
 
 text,textarea,input[type="text"] {

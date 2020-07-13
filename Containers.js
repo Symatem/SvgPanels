@@ -68,7 +68,7 @@ export class ContainerPanel extends Panel {
                 this.node.appendChild(child.node);
             else
                 this.node.insertBefore(child.node, this.children[(newIndex == oldIndex+1) ? newIndex+1 : newIndex].node);
-            child.node.dispatchEvent(new Event('parentChanged'));
+            child.dispatchEvent({'type': 'parentchange'});
         }
         this.children.splice(newIndex, 0, child);
         return true;
@@ -77,12 +77,20 @@ export class ContainerPanel extends Panel {
     removeChild(child) {
         if(child.parent != this)
             return false;
+        let panel = this.root.focusedPanel;
+        while(panel) {
+            if(panel == child) {
+                this.root.focusedPanel.dispatchEvent({'type': 'defocus'});
+                break;
+            }
+            panel = panel.parent;
+        }
         delete child.parent;
         child.root = undefined;
         this.children.splice(this.children.indexOf(child), 1);
         if(child.node) {
             this.node.removeChild(child.node);
-            child.node.dispatchEvent(new Event('parentChanged'));
+            child.dispatchEvent({'type': 'parentchange'});
         }
         child.resetVisibilityAnimation();
         return true;
@@ -125,6 +133,30 @@ export class ContainerPanel extends Panel {
     }
 }
 
+const keyModifiers = ['altKey', 'ctrlKey', 'metaKey', 'shiftKey'];
+
+function refineEvent(event) {
+    if(keyModifiers.filter((modifier) => event[modifier]).length > 0)
+        event.preventDefault();
+    event.stopPropagation();
+    if(event.touches) {
+        event.modifierKey = (event.touches.length === 2);
+        event.pointers = event.changedTouches;
+    } else {
+        event.modifierKey = event.shiftKey;
+        event.pointers = [event];
+    }
+    for(const pointer of event.pointers)
+        pointer.position = vec2.fromValues(pointer.clientX, pointer.clientY);
+}
+
+function dualPointerDifference(event) {
+    const diff = vec2.create();
+    if(event.pointers.length == 2)
+        vec2.sub(diff, event.pointers[0].position, event.pointers[1].position);
+    return diff;
+}
+
 export class RootPanel extends ContainerPanel {
     constructor(parentNode, size) {
         super(vec2.create(), size, Panel.createElement('svg', parentNode));
@@ -138,8 +170,101 @@ export class RootPanel extends ContainerPanel {
         this.overlays = new ContainerPanel(vec2.create(), vec2.create());
         this.centeringPanel.insertChild(this.overlays);
         this.modalOverlayBackgroundPanel = new RectPanel(vec2.create(), this.size);
-        this.node.ongesturestart = this.node.ontouchstart = (event) => {
+        this.defsNode = Panel.createElement('defs', this.node);
+        const blurFilter = Panel.createElement('filter', this.defsNode);
+        blurFilter.setAttribute('id', 'blurFilter');
+        blurFilter.setAttribute('x', -10);
+        blurFilter.setAttribute('y', -10);
+        blurFilter.setAttribute('width', 20);
+        blurFilter.setAttribute('height', 20);
+        const feGaussianBlur = Panel.createElement('feGaussianBlur', blurFilter);
+        feGaussianBlur.setAttribute('in', 'SourceGraphic');
+        feGaussianBlur.setAttribute('result', 'blur');
+        feGaussianBlur.setAttribute('stdDeviation', 3);
+        const feComponentTransfer = Panel.createElement('feComponentTransfer', blurFilter);
+        feComponentTransfer.setAttribute('in', 'blur');
+        feComponentTransfer.setAttribute('result', 'brighter');
+        const feFunc = Panel.createElement('feFuncA', feComponentTransfer);
+        feFunc.setAttribute('type', 'linear');
+        feFunc.setAttribute('slope', 2);
+        const feMerge = Panel.createElement('feMerge', blurFilter);
+        Panel.createElement('feMergeNode', feMerge).setAttribute('in', 'brighter');
+        Panel.createElement('feMergeNode', feMerge).setAttribute('in', 'SourceGraphic');
+        this.node.ongesturestart = (event) => {
             event.preventDefault();
+        };
+        this.node.onwheel = (event) => {
+            event.preventDefault();
+            refineEvent(event);
+            Panel.dispatchEvent({
+                'type': 'pointerzoom',
+                'bubbles': true,
+                'source': 'wheel',
+                'position': event.pointers[0].position,
+                'difference': vec2.fromValues(event.deltaX, event.deltaY)
+            });
+        };
+        let pointerEvent;
+        this.node.onmousedown = this.node.ontouchstart = (event) => {
+            refineEvent(event);
+            pointerEvent = {
+                'type': 'pointerstart',
+                'bubbles': true,
+                'source': 'pointer',
+                'modifierKey': event.modifierKey,
+                'position': event.pointers[0].position,
+                'moved': false
+            };
+            if(event.touches) {
+                pointerEvent.primaryTouchID = event.touches[0].identifier;
+                pointerEvent.zoomPointerDifference = dualPointerDifference(event);
+                if(vec2.length(pointerEvent.zoomPointerDifference) < 300)
+                    delete pointerEvent.zoomPointerDifference;
+            } else
+                delete pointerEvent.zoomPointerDifference;
+            Panel.dispatchEvent(pointerEvent);
+            pointerEvent.target = pointerEvent.target || pointerEvent.originalTarget;
+            pointerEvent.startPosition = pointerEvent.position;
+            delete pointerEvent.bubbles;
+        };
+        this.node.onmousemove = this.node.ontouchmove = (event) => {
+            refineEvent(event);
+            if(!pointerEvent)
+                return;
+            pointerEvent.modifierKey = event.modifierKey;
+            if(pointerEvent.zoomPointerDifference) {
+                const dist = dualPointerDifference(event);
+                if(vec2.length(dist) > 0 && onZoom) {
+                    const center = vec2.create();
+                    vec2.add(center, event.pointers[0].position, event.pointers[1].position);
+                    vec2.scale(center, center, 0.5);
+                    pointerEvent.type = 'pointerzoom';
+                    pointerEvent.position = center;
+                    pointerEvent.factor = vec2.length(dist)/vec2.length(pointerEvent.zoomPointerDifference);
+                    pointerEvent.zoomPointerDifference = dist;
+                    pointerEvent.target.dispatchEvent(pointerEvent);
+                }
+            } else {
+                pointerEvent.type = 'pointermove';
+                pointerEvent.position = event.pointers[0].position;
+                pointerEvent.target.dispatchEvent(pointerEvent);
+            }
+            pointerEvent.moved = true;
+        };
+        this.node.onmouseup = this.node.ontouchend = this.node.onmouseleave = this.node.ontouchleave = this.node.ontouchcancel = (event) => {
+            refineEvent(event);
+            if(!pointerEvent || (event.touches && event.touches.length > 0 && pointerEvent.primaryTouchID != event.changedTouches[0].identifier))
+                return;
+            if(pointerEvent.moved) {
+                pointerEvent.type = 'pointerend';
+                pointerEvent.modifierKey = event.modifierKey;
+                pointerEvent.position = event.pointers[0].position;
+                pointerEvent.target.dispatchEvent(pointerEvent);
+            } else if(event.altKey)
+                pointerEvent.target.dispatchEvent({'type': 'focus', 'bubbles': true, 'source': 'pointer', 'position': event.pointers[0].position});
+            else
+                pointerEvent.target.dispatchEvent({'type': 'action', 'bubbles': true, 'source': 'pointer', 'position': event.pointers[0].position});
+            pointerEvent = undefined;
         };
     }
 
@@ -158,23 +283,26 @@ export class RootPanel extends ContainerPanel {
         this.node.setAttribute('height', this.size[1]);
     }
 
-    openModalOverlay(overlay) {
+    openModalOverlay(event, overlay) {
         if(!this.modalOverlayBackgroundPanel.parent) {
             this.centeringPanel.insertChild(this.modalOverlayBackgroundPanel, -2);
-            this.modalOverlayBackgroundPanel.registerClickOrDragEvent((event) => {
-                this.closeModalOverlay(overlay);
+            this.modalOverlayBackgroundPanel.registerActionEvent(() => {
+                this.closeModalOverlay({'type': 'close', 'source': 'pointer'}, overlay);
             });
         }
         this.overlays.insertChildAnimated(overlay);
+        if(event.source == 'keyboard')
+            overlay.dispatchEvent({'type': 'focus'});
     }
 
-    closeModalOverlay(overlay) {
+    closeModalOverlay(event, overlay) {
+        event.type = 'close';
         let index = Math.max(0, this.overlays.children.indexOf(overlay));
         if(index == 0)
             this.centeringPanel.removeChild(this.modalOverlayBackgroundPanel);
-        for(; index < this.overlays.children.length; ++index) {
-            const child = this.overlays.children[index];
-            child.node.dispatchEvent(new Event('close'));
+        for(let i = this.overlays.children.length-1; i >= index; --i) {
+            const child = this.overlays.children[i];
+            child.dispatchEvent(event);
             this.overlays.removeChildAnimated(child);
         }
     }
@@ -201,11 +329,11 @@ export class AdaptiveSizeContainerPanel extends ContainerPanel {
     }
 
     recalculateLayout() {
-        const minPosition = vec2.create(),
-              maxPosition = vec2.create(),
+        const minPosition = vec2.fromValues(Infinity, Infinity),
+              maxPosition = vec2.fromValues(-Infinity, -Infinity),
               center = vec2.create();
-        for(let i = 0; i < this.children.length; ++i) {
-            const childBounds = this.children[i].getBounds();
+        for(const child of this.children) {
+            const childBounds = child.getBounds();
             vec2.min(minPosition, minPosition, childBounds[0]);
             vec2.max(maxPosition, maxPosition, childBounds[1]);
         }
@@ -215,9 +343,9 @@ export class AdaptiveSizeContainerPanel extends ContainerPanel {
         vec2.add(center, maxPosition, minPosition);
         if(vec2.dot(center, center) > 0.0) {
             vec2.scale(center, center, 0.5);
-            for(let i = 0; i < this.children.length; ++i) {
-                vec2.sub(this.children[i].position, this.children[i].position, center);
-                this.children[i].updatePosition();
+            for(const child of this.children) {
+                vec2.sub(child.position, child.position, center);
+                child.updatePosition();
             }
         }
         this.updateSize();
@@ -231,14 +359,14 @@ export class CheckboxPanel extends ContainerPanel {
         this.rectPanel = new RectPanel(vec2.create(), this.size);
         this.insertChild(this.rectPanel);
         this.rectPanel.cornerRadius = 2;
-        this.registerClickOrDragEvent(() => {
+        this.registerActionEvent(() => {
             this.checked = !this.checked;
-            this.node.dispatchEvent(new Event('change'));
         });
         this.imagePanel = new ImagePanel(vec2.create(), vec2.fromValues(9, 9), 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNiIgaGVpZ2h0PSIyNiI+CiAgICA8cGF0aCBmaWxsPSIjRkZGIiBkPSJNMjIuNTY2NDA2IDQuNzMwNDY5TDIwLjc3MzQzOCAzLjUxMTcxOUMyMC4yNzczNDQgMy4xNzU3ODEgMTkuNTk3NjU2IDMuMzA0Njg4IDE5LjI2NTYyNSAzLjc5Njg3NUwxMC40NzY1NjMgMTYuNzU3ODEzTDYuNDM3NSAxMi43MTg3NUM2LjAxNTYyNSAxMi4yOTY4NzUgNS4zMjgxMjUgMTIuMjk2ODc1IDQuOTA2MjUgMTIuNzE4NzVMMy4zNzEwOTQgMTQuMjUzOTA2QzIuOTQ5MjE5IDE0LjY3NTc4MSAyLjk0OTIxOSAxNS4zNjMyODEgMy4zNzEwOTQgMTUuNzg5MDYzTDkuNTgyMDMxIDIyQzkuOTI5Njg4IDIyLjM0NzY1NiAxMC40NzY1NjMgMjIuNjEzMjgxIDEwLjk2ODc1IDIyLjYxMzI4MUMxMS40NjA5MzggMjIuNjEzMjgxIDExLjk1NzAzMSAyMi4zMDQ2ODggMTIuMjc3MzQ0IDIxLjgzOTg0NEwyMi44NTU0NjkgNi4yMzQzNzVDMjMuMTkxNDA2IDUuNzQyMTg4IDIzLjA2MjUgNS4wNjY0MDYgMjIuNTY2NDA2IDQuNzMwNDY5WiIvPgo8L3N2Zz4K');
         this.insertChild(this.imagePanel);
         this.rectPanel.updateSize();
         this.rectPanel.updatePosition();
+        this.registerFocusEvent(this.rectPanel.node);
     }
 
     get checked() {
@@ -246,10 +374,13 @@ export class CheckboxPanel extends ContainerPanel {
     }
 
     set checked(value) {
+        if(this.checked == value)
+            return;
         if(value)
             this.node.classList.add('active');
         else
             this.node.classList.remove('active');
+        this.dispatchEvent({'type': 'change'});
     }
 }
 
@@ -273,6 +404,7 @@ export class PanePanel extends ClippingViewPanel {
         super(position, size);
         this.backgroundPanel.node.classList.add('pane');
         this.backgroundPanel.cornerRadius = 5;
+        this.registerFocusEvent(this.backgroundPanel.node);
     }
 
     updateSize() {
@@ -343,13 +475,11 @@ export class ButtonPanel extends TilingPanel {
     constructor(position, cssClass='button', backgroundPanel=new RectPanel(vec2.create(), vec2.create())) {
         super(position, vec2.create());
         this.padding = vec2.fromValues(4, 2);
-        this.registerClickOrDragEvent(() => {
-            this.node.dispatchEvent(new Event('activate'));
-        });
         this.backgroundPanel = backgroundPanel;
         if(cssClass)
             this.backgroundPanel.node.classList.add(cssClass);
         this.backgroundPanel.cornerRadius = (cssClass == 'toolbarMenuButton') ? 0 : 4;
+        this.registerFocusEvent(this.backgroundPanel.node);
     }
 
     insertChild(child, newIndex=-1) {
@@ -362,21 +492,24 @@ export class ButtonPanel extends TilingPanel {
 export class OverlayMenuPanel extends ButtonPanel {
     constructor(position, overlayPanel=new AdaptiveSizeContainerPanel(vec2.create()), cssClass='overlayMenuButton') {
         super(position, cssClass);
-        this.node.addEventListener('activate', (event) => {
+        this.registerActionEvent((event) => {
             if(this.backgroundPanel.node.classList.contains('active'))
-                this.root.closeModalOverlay(this.overlayPanel);
+                this.root.closeModalOverlay(event, this.overlayPanel);
             else {
                 this.backgroundPanel.node.classList.add('active');
                 this.updateOverlayPosition();
-                this.root.openModalOverlay(this.overlayPanel);
+                this.root.openModalOverlay(event, this.overlayPanel);
             }
         });
         this.overlayPanel = overlayPanel;
         this.overlayPanel.backgroundPanel = new SpeechBalloonPanel(vec2.create(), vec2.create());
         this.overlayPanel.backgroundPanel.node.classList.add('overlayMenu');
-        this.overlayPanel.node.addEventListener('close', (event) => {
+        this.overlayPanel.addEventListener('close', (event) => {
             this.backgroundPanel.node.classList.remove('active');
+            if(event.source == 'keyboard')
+                this.dispatchEvent({'type': 'focus'});
         });
+        this.overlayPanel.registerFocusEvent(this.overlayPanel.backgroundPanel.node);
     }
 
     updateOverlayPosition() {
@@ -462,6 +595,13 @@ export class ToolbarPanel extends TilingPanel {
         this.sizeAlongAxis = -1;
         this.padding[0] = 10;
         this.shortcuts = {};
+        for(let p = 0; p < 1<<keyModifiers.length; ++p) {
+            const combination = [];
+            for(let i = 0; i < keyModifiers.length; ++i)
+                if((p>>i)&1)
+                    combination.push(keyModifiers[i]);
+            this.shortcuts[combination.join(',')] = {};
+        }
         document.addEventListener('keydown', this.dispatch.bind(this, 'keydown'));
         this.insertChild(new Panel(vec2.create(), vec2.create()));
     }
@@ -477,14 +617,13 @@ export class ToolbarPanel extends TilingPanel {
     }
 
     keydown(panel, event) {
-        const candidate = this.shortcuts[event.keyCode];
-        if(!candidate)
+        const modifiers = keyModifiers.filter((modifier) => event[modifier]).join(','),
+              action = this.shortcuts[modifiers][event.keyCode];
+        if(!action)
             return false;
-        for(const key in candidate.modifiers)
-            if(event[key] != candidate.modifiers[key])
-                return false;
-        if(candidate.action)
-            candidate.action();
+        event.source = 'keyboard';
+        if(action)
+            action(event);
         return true;
     }
 
@@ -498,20 +637,19 @@ export class ToolbarPanel extends TilingPanel {
     }
 
     generateMenuButton(contentPanel, shortCut, action) {
-        const actionHandler = () => {
-            this.root.closeModalOverlay();
-            if(action)
-                action();
-        };
         const buttonPanel = new ButtonPanel(vec2.create(), 'toolbarMenuButton');
-        buttonPanel.node.addEventListener('click', actionHandler);
+        buttonPanel.registerActionEvent((event) => {
+            this.root.closeModalOverlay(event);
+            if(action)
+                action(event);
+        });
         buttonPanel.axis = 0;
         buttonPanel.insertChild(contentPanel);
         buttonPanel.insertChild(new Panel(vec2.create(), vec2.create()));
         if(shortCut) {
             buttonPanel.insertChild(new Panel(vec2.create(), vec2.fromValues(10, 0)));
             buttonPanel.insertChild(new LabelPanel(vec2.create(), shortCut));
-            buttonPanel.shortCut = {'action': actionHandler, 'modifiers': {}};
+            buttonPanel.shortCut = {'action': action, 'modifiers': []};
             const codes = {
                 '⇧': 'shiftKey', '⌘': 'metaKey', '⎇': 'altKey', '⌥': 'altKey', '^': 'ctrlKey', '⎈': 'ctrlKey',
                 '⌫': 8, '↹': 9, '⌧': 12, '↵': 13, '⏎': 13, '␣': 32, '⇞': 33, '⇟': 34, '↘': 35, '↖': 36, '←': 37, '↑': 38, '→': 39, '↓': 40, '⌦': 46
@@ -523,9 +661,10 @@ export class ToolbarPanel extends TilingPanel {
                 else if(typeof code == 'number')
                     buttonPanel.shortCut.keyCode = code;
                 else if(typeof code == 'string')
-                    buttonPanel.shortCut.modifiers[code] = true;
+                    buttonPanel.shortCut.modifiers.push(code);
             }
-            this.shortcuts[buttonPanel.shortCut.keyCode] = buttonPanel.shortCut;
+            buttonPanel.shortCut.modifiers.sort();
+            this.shortcuts[buttonPanel.shortCut.modifiers.join(',')][buttonPanel.shortCut.keyCode] = action;
         }
         return buttonPanel;
     }
@@ -581,15 +720,16 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
         this.splitHandleSize = 20;
         this.mergeSizeThreshold = 10;
         this.backgroundPanel = new RectPanel(vec2.create(), vec2.create());
-        this.backgroundPanel.registerPointerEvents((event) => {
-            const dragOrigin = event.pointers[0].position,
-                  position = dragOrigin[this.axis];
+        this.backgroundPanel.cornerRadius = 5;
+        this.addEventListener('pointerstart', (event) => {
+            event.position = this.backgroundPanel.relativePosition(event.position);
+            const position = event.position[this.axis];
             let index = 0;
             while(index < this.children.length && this.children[index].position[this.axis] < position)
                 ++index;
             const sizeOtherAxis = (this.size[1-this.axis]-this.padding[this.axis])*0.5,
-                  insertAfter = dragOrigin[1-this.axis] < this.splitHandleSize-sizeOtherAxis,
-                  insertBefore = dragOrigin[1-this.axis] > sizeOtherAxis-this.splitHandleSize;
+                  insertAfter = event.position[1-this.axis] < this.splitHandleSize-sizeOtherAxis,
+                  insertBefore = event.position[1-this.axis] > sizeOtherAxis-this.splitHandleSize;
             if(this.enableSplitAndMerge && (insertAfter || insertBefore)) {
                 if((insertBefore && index == 0) || (insertAfter && index == this.children.length))
                     return [];
@@ -606,47 +746,50 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
             }
             if(index <= 0 || index >= this.children.length)
                 return [];
-            const prevChild = this.children[index-1],
-                  nextChild = this.children[index],
-                  prevChildOriginalPosition = prevChild.position[this.axis],
-                  nextChildOriginalPosition = nextChild.position[this.axis],
-                  prevChildOriginalSize = prevChild.size[this.axis],
-                  nextChildOriginalSize = nextChild.size[this.axis],
-                  absoluteSizeSum = prevChildOriginalSize+nextChildOriginalSize,
-                  relativeSizeSum = prevChild.relativeSize+nextChild.relativeSize;
-            return [(event, moved) => {
-                const diff = Math.max(-prevChildOriginalSize, Math.min(nextChildOriginalSize, event.pointers[0].position[this.axis]-dragOrigin[this.axis]));
-                prevChild.position[this.axis] = prevChildOriginalPosition+diff*0.5;
-                prevChild.updatePosition();
-                nextChild.position[this.axis] = nextChildOriginalPosition+diff*0.5;
-                nextChild.updatePosition();
-                prevChild.size[this.axis] = prevChildOriginalSize+diff;
-                prevChild.updateSize();
-                nextChild.size[this.axis] = nextChildOriginalSize-diff;
-                nextChild.updateSize();
-                prevChild.relativeSize = relativeSizeSum*prevChild.size[this.axis]/absoluteSizeSum;
-                nextChild.relativeSize = relativeSizeSum-prevChild.relativeSize;
-            }, (event, moved) => {
-                const smallerChild = (prevChild.relativeSize < nextChild.relativeSize) ? prevChild : nextChild;
-                if(this.enableSplitAndMerge && moved && smallerChild.size[this.axis] < this.mergeSizeThreshold) {
-                    const otherChild = (smallerChild == nextChild) ? prevChild : nextChild;
-                    otherChild.size[this.axis] += smallerChild.size[this.axis]+this.interChildSpacing;
-                    otherChild.updateSize();
-                    otherChild.position[this.axis] += (smallerChild.size[this.axis]+this.interChildSpacing)*(smallerChild == nextChild ? 0.5 : -0.5);
-                    otherChild.updatePosition();
-                    this.removeChild(smallerChild);
-                    if(this.children.length == 1) {
-                        const child = this.children[0],
-                              parent = this.parent,
-                              index = parent.children.indexOf(this);
-                        super.removeChild(child);
-                        parent.insertChild(child, index);
-                        parent.removeChild(this);
-                        parent.recalculateLayout();
-                    }
+            event.prevChild = this.children[index-1],
+            event.nextChild = this.children[index],
+            event.prevChildOriginalPosition = event.prevChild.position[this.axis],
+            event.nextChildOriginalPosition = event.nextChild.position[this.axis],
+            event.prevChildOriginalSize = event.prevChild.size[this.axis],
+            event.nextChildOriginalSize = event.nextChild.size[this.axis],
+            event.absoluteSizeSum = event.prevChildOriginalSize+event.nextChildOriginalSize,
+            event.relativeSizeSum = event.prevChild.relativeSize+event.nextChild.relativeSize;
+        });
+        this.addEventListener('pointermove', (event) => {
+            event.position = this.backgroundPanel.relativePosition(event.position);
+            const diff = Math.max(-event.prevChildOriginalSize, Math.min(event.nextChildOriginalSize, event.position[this.axis]-event.startPosition[this.axis]));
+            event.prevChild.position[this.axis] = event.prevChildOriginalPosition+diff*0.5;
+            event.prevChild.updatePosition();
+            event.nextChild.position[this.axis] = event.nextChildOriginalPosition+diff*0.5;
+            event.nextChild.updatePosition();
+            event.prevChild.size[this.axis] = event.prevChildOriginalSize+diff;
+            event.prevChild.updateSize();
+            event.nextChild.size[this.axis] = event.nextChildOriginalSize-diff;
+            event.nextChild.updateSize();
+            event.prevChild.relativeSize = event.relativeSizeSum*event.prevChild.size[this.axis]/event.absoluteSizeSum;
+            event.nextChild.relativeSize = event.relativeSizeSum-event.prevChild.relativeSize;
+        });
+        this.addEventListener('pointerend', (event) => {
+            const smallerChild = (event.prevChild.relativeSize < event.nextChild.relativeSize) ? event.prevChild : event.nextChild;
+            if(this.enableSplitAndMerge && smallerChild.size[this.axis] < this.mergeSizeThreshold) {
+                const otherChild = (smallerChild == event.nextChild) ? event.prevChild : event.nextChild;
+                otherChild.size[this.axis] += smallerChild.size[this.axis]+this.interChildSpacing;
+                otherChild.updateSize();
+                otherChild.position[this.axis] += (smallerChild.size[this.axis]+this.interChildSpacing)*(smallerChild == event.nextChild ? 0.5 : -0.5);
+                otherChild.updatePosition();
+                this.removeChild(smallerChild);
+                if(this.children.length == 1) {
+                    const child = this.children[0],
+                          parent = this.parent,
+                          index = parent.children.indexOf(this);
+                    super.removeChild(child);
+                    parent.insertChild(child, index);
+                    parent.removeChild(this);
+                    parent.recalculateLayout();
                 }
-            }];
-        }, undefined, this.backgroundPanel.node);
+            }
+        });
+        this.registerFocusEvent(this.backgroundPanel.node);
     }
 
     recalculateLayout() {
@@ -695,19 +838,17 @@ export class RadioButtonsPanel extends TilingPanel {
     }
 
     insertChild(child, newIndex=-1) {
-        if(!child.node.onmousedown && !child.node.ontouchstart)
-            child.registerClickOrDragEvent(() => {
-                this.activeButton = child;
-                this.node.dispatchEvent(new Event('change'));
-            });
+        child.registerActionEvent(() => {
+            if(this.activeButton == child)
+                return;
+            this.activeButton = child;
+        });
         return super.insertChild(child, newIndex);
     }
 
     removeChild(child) {
-        if(child == this._activeButton) {
+        if(child == this._activeButton)
             this.activeButton = undefined;
-            this.node.dispatchEvent(new Event('change'));
-        }
         return super.removeChild(child);
     }
 
@@ -716,11 +857,14 @@ export class RadioButtonsPanel extends TilingPanel {
     }
 
     set activeButton(button) {
+        if(this._activeButton == button)
+            return;
         if(this._activeButton)
             this._activeButton.backgroundPanel.node.classList.remove('active');
         this._activeButton = button;
         if(this._activeButton)
             this._activeButton.backgroundPanel.node.classList.add('active');
+        this.dispatchEvent({'type': 'change'});
     }
 }
 
@@ -734,16 +878,15 @@ export class TabsViewPanel extends TilingPanel {
         this.enableTabDragging = false;
         this.header = new ClippingViewPanel(vec2.create(), vec2.create());
         this.insertChild(this.header);
-        this.header.backgroundPanel.registerClickOrDragEvent(() => {
-            if(!this.tabsContainer.activeButton)
-                return;
-            this.setActiveTab(undefined);
+        this.header.registerActionEvent(() => {
+            this.tabsContainer.activeButton = undefined;
         });
+        this.header.registerFocusEvent(this.header.backgroundPanel.node);
         this.tabsContainer = new RadioButtonsPanel(vec2.create(), vec2.create());
         this.header.insertChild(this.tabsContainer);
         this.tabsContainer.axis = 1-this.axis;
         this.tabsContainer.interChildSpacing = 4;
-        this.tabsContainer.node.addEventListener('change', () => {
+        this.tabsContainer.addEventListener('change', () => {
             if(this.content)
                 this.body.removeChild(this.content);
             this.content = (this.tabsContainer.activeButton) ? this.tabsContainer.activeButton.content : undefined;
@@ -761,7 +904,7 @@ export class TabsViewPanel extends TilingPanel {
                     ++index;
                 this.tabsContainer.insertChild(item, index);
                 this.tabsContainer.recalculateLayout();
-                this.setActiveTab(item);
+                this.tabsContainer.activeButton = item;
             }
         );
         this.body = new PanePanel(vec2.create(), vec2.create());
@@ -794,17 +937,15 @@ export class TabsViewPanel extends TilingPanel {
         tabHandle.backgroundPanel.cornerRadiusBottomRight = 0;
     }
 
-    setActiveTab(tabHandle) {
-        this.tabsContainer.activeButton = tabHandle;
-        this.tabsContainer.node.dispatchEvent(new Event('change'));
-    }
-
     addTab() {
         const tabHandle = new ButtonPanel(vec2.create(), 'tabHandle', new SpeechBalloonPanel(vec2.create(), vec2.create()));
         this.tabsContainer.insertChild(tabHandle);
         this.updateTabHandleCorners(tabHandle);
         tabHandle.padding = vec2.fromValues(11, 3);
-        tabHandle.registerClickOrDragEvent(this.setActiveTab.bind(this, tabHandle), () => {
+        tabHandle.registerActionEvent(() => {
+            this.tabsContainer.activeButton = tabHandle;
+        });
+        tabHandle.registerDragEvent(() => {
             if(!this.enableTabDragging)
                 return;
             this.removeTab(tabHandle);
@@ -831,67 +972,73 @@ export class InfiniteViewPanel extends ClippingViewPanel {
         this.velocity = vec2.create();
         this.damping = 0.9;
         this.enableSelectionRect = false;
+        this.scrollSpeed = 0.0;
         this.minScale = 1.0;
         this.maxScale = 1.0;
-        this.registerPointerEvents((event) => {
-            if(event.modifierKey && this.enableSelectionRect) {
-                const dragOrigin = event.pointers[0].position;
-                return [(event, moved) => {
-                    if(!this.selectionRect) {
-                        this.selectionRect = new RectPanel(vec2.create(), vec2.create());
-                        this.insertChildAnimated(this.selectionRect);
-                        this.selectionRect.node.classList.add('selectionRect');
-                    }
-                    this.selectionRect.setBounds(dragOrigin, event.pointers[0].position);
-                    this.selectionRect.updatePosition();
-                    this.selectionRect.updateSize();
-                }, (event, moved) => {
-                    if(!moved)
-                        return;
-                    const bounds = this.selectionRect.getBounds();
-                    vec2.transformMat2d(bounds[0], bounds[0], this.inverseContentTransform);
-                    vec2.transformMat2d(bounds[1], bounds[1], this.inverseContentTransform);
-                    this.contentPanel.selectChildrenInside(bounds[0], bounds[1], event.modifierKey);
-                    this.removeChildAnimated(this.selectionRect);
-                    delete this.selectionRect;
-                }];
-            } else {
-                const dragOrigin = event.pointers[0].position,
-                      originalTranslation = this.contentTranslation;
-                let translation = vec2.clone(originalTranslation),
-                    prevTranslation = translation,
-                    prevTimestamp = performance.now();
-                return [(event, moved) => {
-                    if(!moved)
-                        this.node.dispatchEvent(new Event('startedmoving'));
-                    vec2.sub(translation, event.pointers[0].position, dragOrigin);
-                    vec2.add(translation, translation, originalTranslation);
-                    this.setContentTransformation(translation, this.contentScale);
-                    translation = this.contentTranslation;
-                    const timestamp = performance.now();
-                    vec2.sub(this.velocity, translation, prevTranslation);
-                    vec2.scale(this.velocity, this.velocity, 1.0/(timestamp-prevTimestamp));
-                    vec2.copy(prevTranslation, translation);
-                    prevTimestamp = timestamp;
-                }, (event, moved) => {
-                    if(moved)
-                        this.node.dispatchEvent(new Event('stoppedmoving'));
-                    else
-                        this.setAllChildrenSelected(false);
-                }];
+        this.addEventListener('pointerzoom', (event) => {
+            if(this.scrollSpeed != 0.0 && event.difference) {
+                vec2.scaleAndAdd(event.difference, this.contentTranslation, event.difference, this.scrollSpeed);
+                this.setContentTransformation(event.difference, this.contentScale);
+                return;
             }
-        }, (factor, position) => {
-            let scale = this.contentScale;
+            let scale = this.contentScale,
+                factor = (event.difference) ? Math.pow(2, vec2.length(event.difference)*0.1) : event.factor;
             factor = Math.min(Math.max(factor*scale, this.minScale), this.maxScale)/scale;
             if(factor == 1.0)
                 return;
             scale *= factor;
             const translation = this.contentTranslation;
-            vec2.sub(translation, translation, position);
+            vec2.sub(translation, translation, event.position);
             vec2.scale(translation, translation, factor);
-            vec2.add(translation, translation, position);
+            vec2.add(translation, translation, event.position);
             this.setContentTransformation(translation, scale);
-        }, this.backgroundPanel.node);
+        });
+        this.addEventListener('pointerstart', (event) => {
+            event.position = this.backgroundPanel.relativePosition(event.position);
+            event.isSelectionRect = event.modifierKey && this.enableSelectionRect;
+            if(!event.isSelectionRect) {
+                event.originalTranslation = this.contentTranslation;
+                event.prevTranslation = event.translation = vec2.clone(event.originalTranslation);
+                event.originalTranslation = this.contentTranslation;
+                event.prevTimestamp = performance.now();
+            }
+        });
+        this.addEventListener('pointermove', (event) => {
+            event.position = this.backgroundPanel.relativePosition(event.position);
+            if(event.isSelectionRect) {
+                if(!this.selectionRect) {
+                    this.selectionRect = new RectPanel(vec2.create(), vec2.create());
+                    this.insertChildAnimated(this.selectionRect);
+                    this.selectionRect.node.classList.add('selectionRect');
+                }
+                this.selectionRect.setBounds(event.startPosition, event.position);
+                this.selectionRect.updatePosition();
+                this.selectionRect.updateSize();
+            } else {
+                if(!event.moved)
+                    this.dispatchEvent({'type': 'startedmoving'});
+                vec2.sub(event.translation, event.position, event.startPosition);
+                vec2.add(event.translation, event.translation, event.originalTranslation);
+                this.setContentTransformation(event.translation, this.contentScale);
+                event.translation = this.contentTranslation;
+                const timestamp = performance.now();
+                vec2.sub(this.velocity, event.translation, event.prevTranslation);
+                vec2.scale(this.velocity, this.velocity, 1.0/(timestamp-event.prevTimestamp));
+                vec2.copy(event.prevTranslation, event.translation);
+                event.prevTimestamp = timestamp;
+            }
+        });
+        this.addEventListener('pointerend', (event) => {
+            if(event.isSelectionRect) {
+                const bounds = this.selectionRect.getBounds();
+                vec2.transformMat2d(bounds[0], bounds[0], this.inverseContentTransform);
+                vec2.transformMat2d(bounds[1], bounds[1], this.inverseContentTransform);
+                this.contentPanel.selectChildrenInside(bounds[0], bounds[1], event.modifierKey);
+                this.removeChildAnimated(this.selectionRect);
+                delete this.selectionRect;
+            } else
+                this.dispatchEvent({'type': 'stoppedmoving'});
+        });
     }
 
     get contentTranslation() {
@@ -906,29 +1053,29 @@ export class InfiniteViewPanel extends ClippingViewPanel {
         mat2d.set(this.contentTransform, scale, 0.0, 0.0, scale, translation[0], translation[1]);
         mat2d.invert(this.inverseContentTransform, this.contentTransform);
         this.contentPanel.node.setAttribute('transform', 'translate('+translation[0]+', '+translation[1]+') scale('+scale+')');
-        this.node.dispatchEvent(new Event('move'));
+        this.dispatchEvent({'type': 'move'});
     }
 }
 
 export class ScrollViewPanel extends InfiniteViewPanel {
-    constructor(position, size, contentPanel) {
+    constructor(position, size, contentPanel=new AdaptiveSizeContainerPanel(vec2.create())) {
         super(position, size, contentPanel);
+        this.scrollSpeed = 10.0;
         this.scrollBarWidth = 5;
+        this.scrollBarMinLength = 20;
         this.scrollBars = [];
         for(let i = 0; i < 2; ++i) {
             const scrollBar = new RectPanel(vec2.create(), vec2.create());
             this.scrollBars.push(scrollBar);
             scrollBar.showIf = 'overflow'; // always, overflow, moving, never
             scrollBar.node.classList.add('scrollBar');
-            scrollBar.registerPointerEvents((event) => {
-                const dragOrigin = event.pointers[0].position,
-                      originalPosition = scrollBar.position[i],
-                      translation = this.contentTranslation;
-                return [(event, moved) => {
-                    const position = originalPosition+event.pointers[0].position[i]-dragOrigin[i];
-                    translation[i] = 0.5*this.scrollBarWidth-position/scrollBar.maxLength*this.contentPanel.size[i]*this.contentScale;
-                    this.setContentTransformation(translation, this.contentScale);
-                }];
+            scrollBar.addEventListener('pointerstart', (event) => {
+                event.offset = scrollBar.position[i]-event.position[i];
+                event.translation = this.contentTranslation;
+            });
+            scrollBar.addEventListener('pointermove', (event) => {
+                event.translation[i] = 0.5*this.scrollBarWidth-(event.offset+event.position[i])/scrollBar.maxLength*this.contentPanel.size[i]*this.contentScale;
+                this.setContentTransformation(event.translation, this.contentScale);
             });
         }
     }
@@ -952,12 +1099,16 @@ export class ScrollViewPanel extends InfiniteViewPanel {
                   maxTranslation = Math.max(0.0, 0.5*(contentSize-this.size[i]));
             translation[i] = Math.max(-maxTranslation, Math.min(translation[i], maxTranslation));
             this.scrollBars[i].maxLength = this.size[i]-this.scrollBarWidth*2.0;
+            this.scrollBars[i].size[i] = this.scrollBars[i].maxLength*Math.min(1.0, this.size[i]*contentSizeFactor);
+            this.scrollBars[i].size[1-i] = this.scrollBarWidth;
+            if(this.scrollBars[i].size[i] < this.scrollBarMinLength) {
+                this.scrollBars[i].maxLength -= this.scrollBarMinLength-this.scrollBars[i].size[i];
+                this.scrollBars[i].size[i] = this.scrollBarMinLength;
+            }
             this.scrollBars[i].position[i] = -0.5*this.scrollBarWidth-this.scrollBars[i].maxLength*translation[i]*contentSizeFactor;
             this.scrollBars[i].position[1-i] = 0.5*this.size[1-i]-this.scrollBarWidth;
             this.scrollBars[i].updatePosition();
             this.scrollBars[i].cornerRadius = this.scrollBarWidth*0.5;
-            this.scrollBars[i].size[i] = this.scrollBars[i].maxLength*Math.min(1.0, this.size[i]*contentSizeFactor);
-            this.scrollBars[i].size[1-i] = this.scrollBarWidth;
             this.scrollBars[i].updateSize();
             if(this.scrollBars[i].showIf == 'always' || (this.scrollBars[i].showIf == 'overflow' && this.scrollBars[i].size[i] < this.scrollBars[i].maxLength))
                 this.insertChildAnimated(this.scrollBars[i]);
@@ -987,33 +1138,34 @@ export class SliderPanel extends ContainerPanel {
         this.labelPanel = new LabelPanel(vec2.create());
         this.insertChild(this.labelPanel);
         this.textFieldPanel = new TextFieldPanel(vec2.create(), size);
-        this.textFieldPanel.embeddedNode.onchange = this.textFieldPanel.embeddedNode.onblur = () => {
+        this.textFieldPanel.addEventListener('change', (event) => {
             this.value = parseFloat(this.textFieldPanel.text);
             this.removeChild(this.textFieldPanel);
             this.recalculateLayout();
-            this.node.dispatchEvent(new Event('change'));
-        };
+            this.dispatchEvent({'type': 'change', 'source': 'keyboard'});
+        });
         this.minValue = 0.0;
         this.maxValue = 1.0;
         this.value = 0.5;
         this.fixedPointDigits = 2;
         this.node.classList.add('slider');
-        this.registerPointerEvents((event) => {
-            const dragOrigin = event.pointers[0].position[0],
-                  originalValue = this.value;
-            return [(event, moved) => {
-                this.value = originalValue+(event.pointers[0].position[0]-dragOrigin)*(this.maxValue-this.minValue)/this.size[0];
-                this.recalculateLayout();
-            }, (event, moved) => {
-                if(moved) {
-                    this.node.dispatchEvent(new Event('change'));
-                    return;
-                }
-                this.insertChild(this.textFieldPanel);
-                this.textFieldPanel.text = this.labelPanel.text;
-                this.textFieldPanel.embeddedNode.focus();
-            }];
+        this.addEventListener('action', (event) => {
+            this.insertChild(this.textFieldPanel);
+            this.textFieldPanel.text = this.labelPanel.text;
+            this.textFieldPanel.embeddedNode.focus();
         });
+        this.addEventListener('pointerstart', (event) => {
+            event.originalValue = this.value;
+        });
+        this.addEventListener('pointermove', (event) => {
+            this.value = event.originalValue+(event.position[0]-event.startPosition[0])*(this.maxValue-this.minValue)/this.size[0];
+            this.recalculateLayout();
+            this.dispatchEvent({'type': 'input', 'source': 'pointer'});
+        });
+        this.addEventListener('pointerend', (event) => {
+            this.dispatchEvent({'type': 'change', 'source': 'pointer'});
+        });
+        this.registerFocusEvent(this.backgroundPanel.node);
     }
 
     recalculateLayout() {

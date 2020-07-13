@@ -28,6 +28,7 @@ export class Panel {
         this.size = size;
         this.node = node;
         this._selected = false;
+        this.eventListeners = {};
         if(node)
             node.panel = this;
     }
@@ -135,133 +136,94 @@ export class Panel {
             this.selected = true;
     }
 
-    static dispatchEvent(event, type, newEvent) {
-        let panel = document.elementFromPoint(event.pointers[0].position[0], event.pointers[0].position[1]).panel;
-        event = new Event(type, {'bubbles': true});
-        Object.assign(event, newEvent);
-        panel.node.dispatchEvent(event);
-        return event;
+    addEventListener(eventType, callback) {
+        this.eventListeners[eventType] = callback;
     }
 
-    registerPointerEvents(onPointerStart, onZoom, referenceNode) {
-        function dualPointerDistance(event) {
-            return (event.pointers.length == 2) ? vec2.distance(event.pointers[0].position, event.pointers[1].position) : 0;
+    dispatchEvent(event) {
+        event.target = event.originalTarget = this;
+        while(event.target) {
+            if(event.target.eventListeners[event.type])
+                return event.target.eventListeners[event.type](event);
+            if(!event.bubbles)
+                return;
+            event.target = event.target.parent;
         }
-        function refineEvent(event) {
-            if(event.touches) {
-                event.modifierKey = (event.touches.length === 2);
-                event.pointers = event.changedTouches;
-            } else {
-                event.modifierKey = event.shiftKey;
-                event.pointers = [event];
-            }
-            if(referenceNode) {
-                const bounds = referenceNode.getBoundingClientRect();
-                for(const pointer of event.pointers)
-                    pointer.position = vec2.fromValues(pointer.clientX-bounds.x-bounds.width*0.5, pointer.clientY-bounds.y-bounds.height*0.5);
-            } else for(const pointer of event.pointers)
-                pointer.position = vec2.fromValues(pointer.clientX, pointer.clientY);
-        }
-        if(onZoom)
-            this.node.onwheel = (event) => {
-                event.stopPropagation();
-                event.preventDefault();
-                refineEvent(event);
-                onZoom(Math.pow(2, event.deltaY*0.1), event.pointers[0].position);
-            };
-        this.node.onmousedown = this.node.ontouchstart = (event) => {
-            event.stopPropagation();
-            refineEvent(event);
-            let primaryTouchID, zoomPointerDistance, moved = false;
-            if(event.touches) {
-                primaryTouchID = event.touches[0].identifier;
-                zoomPointerDistance = dualPointerDistance(event);
-                zoomPointerDistance = (zoomPointerDistance < 300) ? 0 : zoomPointerDistance;
-            }
-            const [onPointerMoved, onPointerEnd] = onPointerStart(event);
-            this.root.node.onmousemove = this.root.node.ontouchmove = (event) => {
-                event.stopPropagation();
-                event.preventDefault();
-                refineEvent(event);
-                if(zoomPointerDistance) {
-                    const dist = dualPointerDistance(event);
-                    if(dist > 0 && onZoom) {
-                        const center = vec2.create();
-                        vec2.add(center, event.pointers[0].position, event.pointers[1].position);
-                        vec2.scale(center, center, 0.5);
-                        onZoom(dist/zoomPointerDistance, center);
-                        zoomPointerDistance = dist;
-                    }
-                } else if(onPointerMoved)
-                    onPointerMoved(event, moved);
-                moved = true;
-            };
-            this.root.node.onmouseup = this.root.node.ontouchend = this.root.node.onmouseleave = this.root.node.ontouchleave = this.root.node.ontouchcancel = (event) => {
-                event.stopPropagation();
-                event.preventDefault();
-                if(event.touches && event.touches.length > 0 && primaryTouchID != event.changedTouches[0].identifier)
-                    return;
-                refineEvent(event);
-                this.root.node.onmousemove = null;
-                this.root.node.ontouchmove = null;
-                this.root.node.onmouseup = null;
-                this.root.node.ontouchend = null;
-                this.root.node.onmouseleave = null;
-                this.root.node.ontouchleave = null;
-                this.root.node.ontouchcancel = null;
-                if(onPointerEnd)
-                    onPointerEnd(event, moved);
-            };
-            if(event.type === 'touchstart') {
-                this.node.onmousedown = null;
-                this.root.node.onmousemove = null;
-                this.root.node.onmouseup = null;
-                this.root.node.onmouseleave = null;
-            }
-        };
     }
 
-    registerClickOrDragEvent(onClick, onDragStart) {
-        this.registerPointerEvents((event) => {
-            let item, root = this.root;
-            const position = this.getRootPosition();
-            vec2.sub(position, position, event.pointers[0].position);
-            return [(event, moved) => {
-                if(!moved && onDragStart) {
-                    item = onDragStart();
-                    item.node.classList.add('disabled');
-                    root.overlays.insertChild(item);
-                }
-                if(item) {
-                    vec2.add(item.position, position, event.pointers[0].position);
-                    item.updatePosition();
-                    document.body.style.cursor = Panel.dispatchEvent(event, 'mayDrop', {'item': item}).canDrop ? 'alias' : 'no-drop';
-                }
-            }, (event, moved) => {
-                if(moved) {
-                    if(item) {
-                        document.body.style.cursor = '';
-                        item.node.classList.remove('disabled');
-                        this.root.overlays.removeChild(item);
-                        Panel.dispatchEvent(event, 'drop', {'item': item});
-                    }
-                } else if(onClick)
-                    onClick();
-            }];
+    static dispatchEvent(event) {
+        const element = document.elementFromPoint(event.position[0], event.position[1]);
+        return (element && element.panel) ? element.panel.dispatchEvent(event) : undefined;
+    }
+
+    relativePosition(position) {
+        const bounds = this.node.getBoundingClientRect();
+        return vec2.fromValues(position[0]-bounds.x-bounds.width*0.5, position[1]-bounds.y-bounds.height*0.5);
+    }
+
+    registerDragEvent(onDragStart) {
+        this.addEventListener('pointerstart', (event) => {});
+        this.addEventListener('pointermove', (event) => {
+            if(!event.moved) {
+                const root = this.root,
+                      rootPosition = this.getRootPosition();
+                event.item = onDragStart();
+                event.item.node.classList.add('disabled');
+                root.overlays.insertChild(event.item);
+                event.offset = vec2.create();
+                if(Object.getPrototypeOf(this) == Object.getPrototypeOf(event.item))
+                    vec2.sub(event.offset, rootPosition, event.position);
+                else
+                    vec2.scaleAndAdd(event.offset, event.offset, root.size, -0.5);
+            }
+            if(event.item) {
+                vec2.add(event.item.position, event.offset, event.position);
+                event.item.updatePosition();
+                document.body.style.cursor = this.constructor.dispatchEvent({'type': 'mayDrop', 'bubbles': true, 'position': event.position, 'item': event.item}) ? 'alias' : 'no-drop';
+            }
+        });
+        this.addEventListener('pointerend', (event) => {
+            if(event.moved && event.item) {
+                document.body.style.cursor = '';
+                event.item.node.classList.remove('disabled');
+                this.root.overlays.removeChild(event.item);
+                this.constructor.dispatchEvent({'type': 'drop', 'bubbles': true, 'position': event.position, 'item': event.item});
+            }
         });
     }
 
     registerDropEvent(acceptsDrop, onDrop) {
-        this.node.addEventListener('mayDrop', (event) => {
+        this.addEventListener('mayDrop', (event) => acceptsDrop(event.item));
+        this.addEventListener('drop', (event) => {
             if(!acceptsDrop(event.item))
-                return;
-            event.canDrop = true;
-            event.stopPropagation();
-        });
-        this.node.addEventListener('drop', (event) => {
-            if(!acceptsDrop(event.item))
-                return;
+                return false;
             onDrop(event.item);
+            return true;
+        });
+    }
+
+    registerActionEvent(action) {
+        this.addEventListener('pointerstart', (event) => {});
+        this.addEventListener('action', action);
+    }
+
+    registerFocusEvent(focusNode) {
+        this.addEventListener('focus', (event) => {
+            if(this.focused || !this.root)
+                return;
+            this.focused = true;
+            focusNode.classList.add('focused');
+            if(this.root.focusedPanel)
+                this.root.focusedPanel.dispatchEvent({'type': 'defocus'});
+            this.root.focusedPanel = this;
+        });
+        this.addEventListener('defocus', (event) => {
+            if(!this.focused)
+                return;
+            this.focused = false;
+            focusNode.classList.remove('focused');
+            if(this.root)
+                delete this.root.focusedPanel;
         });
     }
 }

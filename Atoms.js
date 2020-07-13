@@ -40,7 +40,7 @@ export class CirclePanel extends Panel {
 
     updateSize() {
         super.updateSize();
-        this.node.setAttribute('r', Math.min(this.size[0], this.size[1]));
+        this.node.setAttribute('r', Math.min(this.size[0], this.size[1])*0.5);
     }
 }
 
@@ -135,14 +135,32 @@ export class XhtmlPanel extends Panel {
     }
 }
 
-export class TextFieldPanel extends XhtmlPanel {
-    constructor(position, size) {
-        super(position, size, 'input');
-        this.embeddedNode.setAttribute('type', 'text');
+class TextPanel extends XhtmlPanel {
+    constructor(position, size, tag) {
+        super(position, size, tag);
         this.embeddedNode.addEventListener('keydown', (event) => {
             if(!event.metaKey && !event.ctrlKey)
                 event.stopPropagation();
+            if(event.key == 'Tab') {
+                event.preventDefault();
+                if(event.shiftKey)
+                    this.embeddedNode.blur();
+                else {
+                    const index = this.embeddedNode.selectionStart+1;
+                    this.text = this.text.slice(0, this.embeddedNode.selectionStart)+'\t'+this.text.slice(this.embeddedNode.selectionEnd);
+                    this.embeddedNode.setSelectionRange(index, index);
+                }
+                return;
+            }
+            this.dispatchEvent({'type': 'input', 'source': 'keyboard'});
         });
+        this.embeddedNode.onblur = this.embeddedNode.onchange = (event) => {
+            this.dispatchEvent({'type': 'change', 'source': 'keyboard'});
+        };
+        this.registerActionEvent((event) => {
+            this.embeddedNode.focus();
+        });
+        this.registerFocusEvent(this.embeddedNode);
     }
 
     get text() {
@@ -154,21 +172,16 @@ export class TextFieldPanel extends XhtmlPanel {
     }
 }
 
-export class TextAreaPanel extends XhtmlPanel {
+export class TextFieldPanel extends TextPanel {
+    constructor(position, size) {
+        super(position, size, 'input');
+        this.embeddedNode.setAttribute('type', 'text');
+    }
+}
+
+export class TextAreaPanel extends TextPanel {
     constructor(position, size) {
         super(position, size, 'textarea');
-        this.embeddedNode.addEventListener('keydown', (event) => {
-            if(!event.metaKey && !event.ctrlKey)
-                event.stopPropagation();
-        });
-    }
-
-    get text() {
-        return this.embeddedNode.value;
-    }
-
-    set text(text) {
-        this.embeddedNode.value = text;
     }
 }
 

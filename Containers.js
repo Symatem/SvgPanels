@@ -133,10 +133,14 @@ export class ContainerPanel extends Panel {
     }
 }
 
-const keyModifiers = ['altKey', 'ctrlKey', 'metaKey', 'shiftKey'];
+const keyModifiers = ['alt', 'ctrl', 'meta', 'shift'],
+      keyCodeByCharacter = {
+    '⇧': 'shift', '⌘': 'meta', '⎇': 'alt', '⌥': 'alt', '^': 'ctrl', '⎈': 'ctrl',
+    '⌫': 8, '↹': 9, '⌧': 12, '↵': 13, '⏎': 13, '␣': 32, '⇞': 33, '⇟': 34, '↘': 35, '↖': 36, '←': 37, '↑': 38, '→': 39, '↓': 40, '⌦': 46
+};
 
 function refineEvent(event) {
-    if(keyModifiers.filter((modifier) => event[modifier]).length > 0)
+    if(keyModifiers.filter((modifier) => event[modifier+'Key']).length > 0)
         event.preventDefault();
     event.stopPropagation();
     if(event.touches) {
@@ -292,7 +296,7 @@ export class RootPanel extends ContainerPanel {
         }
         this.overlays.insertChildAnimated(overlay);
         if(event.source == 'keyboard')
-            overlay.dispatchEvent({'type': 'focus'});
+            overlay.dispatchEvent({'type': 'focusnavigation', 'direction': 'in'});
     }
 
     closeModalOverlay(event, overlay) {
@@ -318,6 +322,32 @@ export class RootPanel extends ContainerPanel {
                 document.documentElement.webkitRequestFullscreen();
             else
                 this.node.requestFullscreen();
+        }
+    }
+
+    navigateFocus(direction, event) {
+        switch(direction) {
+            case 'defocus':
+                if(this.focusedPanel)
+                    this.focusedPanel.dispatchEvent({'type': 'defocus', 'source': event.source});
+                break;
+            case 'in':
+                if(this.focusedPanel)
+                    if(!this.focusedPanel.dispatchEvent({'type': 'focusnavigation', 'source': event.source, 'direction': 'in'}))
+                        this.focusedPanel.dispatchEvent({'type': 'action', 'source': event.source});
+                break;
+            case 'out':
+                if(this.focusedPanel && this.focusedPanel.parent) {
+                    if(this.focusedPanel.parent.parent == this.overlays)
+                        this.closeModalOverlay(event, this.focusedPanel.parent);
+                    else
+                        this.focusedPanel.parent.dispatchEvent({'type': 'focus', 'source': event.source, 'bubbles': true});
+                }
+                break;
+            default:
+                if(this.focusedPanel && this.focusedPanel.parent)
+                    this.focusedPanel.parent.dispatchEvent({'type': 'focusnavigation', 'source': event.source, 'bubbles': true, 'direction': direction});
+                break;
         }
     }
 }
@@ -405,6 +435,15 @@ export class PanePanel extends ClippingViewPanel {
         this.backgroundPanel.node.classList.add('pane');
         this.backgroundPanel.cornerRadius = 5;
         this.registerFocusEvent(this.backgroundPanel.node);
+        this.addEventListener('focusnavigation', (event) => {
+            switch(event.direction) {
+                case 'in':
+                    if(this.children[0])
+                        this.children[0].dispatchEvent({'type': 'focus'});
+                    break;
+            }
+            return true;
+        });
     }
 
     updateSize() {
@@ -509,7 +548,6 @@ export class OverlayMenuPanel extends ButtonPanel {
             if(event.source == 'keyboard')
                 this.dispatchEvent({'type': 'focus'});
         });
-        this.overlayPanel.registerFocusEvent(this.overlayPanel.backgroundPanel.node);
     }
 
     updateOverlayPosition() {
@@ -585,6 +623,7 @@ export class DropDownMenuPanel extends OverlayMenuPanel {
             this.insertChild(new ImagePanel(vec2.create(), vec2.fromValues(10, 10), 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMCAxNSI+PHBhdGggc3R5bGU9ImZpbGw6bm9uZTtzdHJva2U6d2hpdGU7c3Ryb2tlLXdpZHRoOjVweDsiIGQ9Ik0zIDVsMTIgMTBsMTIgLTEwIi8+PC9zdmc+'));
         }
         this.overlayPanel.recalculateLayout();
+        this.overlayPanel.registerFocusNavigationEvent();
     }
 }
 
@@ -595,15 +634,11 @@ export class ToolbarPanel extends TilingPanel {
         this.sizeAlongAxis = -1;
         this.padding[0] = 10;
         this.shortcuts = {};
-        for(let p = 0; p < 1<<keyModifiers.length; ++p) {
-            const combination = [];
-            for(let i = 0; i < keyModifiers.length; ++i)
-                if((p>>i)&1)
-                    combination.push(keyModifiers[i]);
-            this.shortcuts[combination.join(',')] = {};
-        }
         document.addEventListener('keydown', this.dispatch.bind(this, 'keydown'));
         this.insertChild(new Panel(vec2.create(), vec2.create()));
+        this.backgroundPanel = new RectPanel(vec2.create(), vec2.create());
+        this.registerFocusEvent(this.backgroundPanel.node);
+        this.registerFocusNavigationEvent();
     }
 
     dispatch(handler, event) {
@@ -617,13 +652,12 @@ export class ToolbarPanel extends TilingPanel {
     }
 
     keydown(panel, event) {
-        const modifiers = keyModifiers.filter((modifier) => event[modifier]).join(','),
-              action = this.shortcuts[modifiers][event.keyCode];
+        const combination = keyModifiers.filter((modifier) => event[modifier+'Key']).concat([event.keyCode]),
+              action = this.shortcuts[combination.join(',')];
         if(!action)
             return false;
-        event.source = 'keyboard';
         if(action)
-            action(event);
+            action({'source': 'keyboard'});
         return true;
     }
 
@@ -650,12 +684,8 @@ export class ToolbarPanel extends TilingPanel {
             buttonPanel.insertChild(new Panel(vec2.create(), vec2.fromValues(10, 0)));
             buttonPanel.insertChild(new LabelPanel(vec2.create(), shortCut));
             buttonPanel.shortCut = {'action': action, 'modifiers': []};
-            const codes = {
-                '⇧': 'shiftKey', '⌘': 'metaKey', '⎇': 'altKey', '⌥': 'altKey', '^': 'ctrlKey', '⎈': 'ctrlKey',
-                '⌫': 8, '↹': 9, '⌧': 12, '↵': 13, '⏎': 13, '␣': 32, '⇞': 33, '⇟': 34, '↘': 35, '↖': 36, '←': 37, '↑': 38, '→': 39, '↓': 40, '⌦': 46
-            };
             for(let i = 0; i < shortCut.length; ++i) {
-                const code = codes[shortCut[i]];
+                const code = keyCodeByCharacter[shortCut[i]];
                 if(!code)
                     buttonPanel.shortCut.keyCode = shortCut.charCodeAt(i);
                 else if(typeof code == 'number')
@@ -664,7 +694,8 @@ export class ToolbarPanel extends TilingPanel {
                     buttonPanel.shortCut.modifiers.push(code);
             }
             buttonPanel.shortCut.modifiers.sort();
-            this.shortcuts[buttonPanel.shortCut.modifiers.join(',')][buttonPanel.shortCut.keyCode] = action;
+            const combination = buttonPanel.shortCut.modifiers.concat([buttonPanel.shortCut.keyCode]).join(',');
+            this.shortcuts[combination] = action;
         }
         return buttonPanel;
     }
@@ -790,6 +821,7 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
             }
         });
         this.registerFocusEvent(this.backgroundPanel.node);
+        this.registerFocusNavigationEvent();
     }
 
     recalculateLayout() {
@@ -833,8 +865,10 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
 }
 
 export class RadioButtonsPanel extends TilingPanel {
-    constructor(position, size) {
+    constructor(position, size, enableNavigation=true) {
         super(position, size);
+        if(enableNavigation)
+            this.registerFocusNavigationEvent();
     }
 
     insertChild(child, newIndex=-1) {
@@ -877,12 +911,11 @@ export class TabsViewPanel extends TilingPanel {
         this.otherAxisAlignment = 'stretch';
         this.enableTabDragging = false;
         this.header = new ClippingViewPanel(vec2.create(), vec2.create());
-        this.insertChild(this.header);
         this.header.registerActionEvent(() => {
             this.tabsContainer.activeButton = undefined;
         });
-        this.header.registerFocusEvent(this.header.backgroundPanel.node);
-        this.tabsContainer = new RadioButtonsPanel(vec2.create(), vec2.create());
+        this.insertChild(this.header);
+        this.tabsContainer = new RadioButtonsPanel(vec2.create(), vec2.create(), false);
         this.header.insertChild(this.tabsContainer);
         this.tabsContainer.axis = 1-this.axis;
         this.tabsContainer.interChildSpacing = 4;
@@ -909,6 +942,35 @@ export class TabsViewPanel extends TilingPanel {
         );
         this.body = new PanePanel(vec2.create(), vec2.create());
         this.insertChild(this.body);
+        this.backgroundPanel = new RectPanel(vec2.create(), vec2.create());
+        this.backgroundPanel.cornerRadius = 5;
+        this.registerFocusEvent(this.backgroundPanel.node);
+        this.addEventListener('focusnavigation', (event) => {
+            let index = this.tabsContainer.children.indexOf(this.root.focusedPanel);
+            if(index == -1)
+                index = this.tabsContainer.children.indexOf(this.tabsContainer.activeButton);
+            if(index == -1)
+                index = this.tabsContainer.children.length>>1;
+            switch(event.direction) {
+                case 'up':
+                    if(this.tabsContainer.children[index])
+                        this.tabsContainer.children[index].dispatchEvent({'type': 'focus'});
+                    break;
+                case 'in':
+                case 'down':
+                    this.body.dispatchEvent({'type': 'focus'});
+                    break;
+                case 'left':
+                    if(this.axis == 1 && this.tabsContainer.children[index-1])
+                        this.tabsContainer.children[--index].dispatchEvent({'type': 'focus'});
+                    break;
+                case 'right':
+                    if(this.axis == 1 && this.tabsContainer.children[index+1])
+                        this.tabsContainer.children[++index].dispatchEvent({'type': 'focus'});
+                    break;
+            }
+            return true;
+        });
     }
 
     recalculateLayout() {

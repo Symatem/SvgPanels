@@ -209,21 +209,46 @@ export class Panel {
 
     registerFocusEvent(focusNode) {
         this.addEventListener('focus', (event) => {
-            if(this.focused || !this.root)
+            if(!this.root || this.root.focusedPanel == this)
                 return;
-            this.focused = true;
             focusNode.classList.add('focused');
             if(this.root.focusedPanel)
                 this.root.focusedPanel.dispatchEvent({'type': 'defocus'});
             this.root.focusedPanel = this;
         });
         this.addEventListener('defocus', (event) => {
-            if(!this.focused)
-                return;
-            this.focused = false;
             focusNode.classList.remove('focused');
             if(this.root)
                 delete this.root.focusedPanel;
+        });
+    }
+
+    registerFocusNavigationEvent() {
+        this.addEventListener('focusnavigation', (event) => {
+            let index = this.children.indexOf(this.root.focusedPanel);
+            switch(event.direction) {
+                case 'in':
+                    if(this.children.length > 0)
+                        this.children[this.children.length>>1].dispatchEvent({'type': 'focus'});
+                    break;
+                case 'left':
+                    if(this.axis == 0 && this.children[index-1])
+                        this.children[--index].dispatchEvent({'type': 'focus'});
+                    break;
+                case 'right':
+                    if(this.axis == 0 && this.children[index+1])
+                        this.children[++index].dispatchEvent({'type': 'focus'});
+                    break;
+                case 'up':
+                    if(this.axis == 1 && this.children[index-1])
+                        this.children[--index].dispatchEvent({'type': 'focus'});
+                    break;
+                case 'down':
+                    if(this.axis == 1 && this.children[index+1])
+                        this.children[++index].dispatchEvent({'type': 'focus'});
+                    break;
+            }
+            return true;
         });
     }
 }

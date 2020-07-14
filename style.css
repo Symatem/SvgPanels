@@ -10,7 +10,7 @@ circle.selected,rect.selected,path.selected {
     stroke: rgb(200, 220, 255);
 }
 
-.focused {
+:not(textarea):not(input).focused {
     filter: url(#blurFilter);
 }
 

@@ -33,6 +33,34 @@ export class LabelPanel extends Panel {
     }
 }
 
+export class PolygonPanel extends Panel {
+    constructor(position, size) {
+        super(position, size, Panel.createElement('path'));
+        this._vertices = [];
+    }
+
+    get vertices() {
+        return this._vertices;
+    }
+
+    set vertices(vertices) {
+        this._vertices = vertices;
+        const minPosition = vec2.fromValues(Infinity, Infinity),
+              maxPosition = vec2.fromValues(-Infinity, -Infinity);
+        for(const vertex of this.vertices) {
+            vec2.min(minPosition, minPosition, vertex);
+            vec2.max(maxPosition, maxPosition, vertex);
+        }
+        vec2.sub(this.size, maxPosition, minPosition);
+        vec2.add(this.position, maxPosition, minPosition);
+        vec2.scale(this.position, this.position, 0.5);
+        for(const vertex of this.vertices)
+            vec2.sub(vertex, vertex, this.position);
+        this.updatePosition();
+        this.node.setAttribute('d', 'M'+vertices.map(v => v.join(',')).join('L'));
+    }
+}
+
 export class CirclePanel extends Panel {
     constructor(position, size) {
         super(position, size, Panel.createElement('circle'));

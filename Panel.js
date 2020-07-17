@@ -223,31 +223,39 @@ export class Panel {
         });
     }
 
-    registerFocusNavigationEvent() {
+    registerFocusNavigationEvent(depth=0) {
         this.addEventListener('focusnavigation', (event) => {
-            let index = this.children.indexOf(this.root.focusedPanel);
+            let child = this.root.focusedPanel;
+            for(let d = 0; d < depth && child; ++d)
+                child = child.parent;
+            let index = this.children.indexOf(child);
+            child = undefined;
             switch(event.direction) {
                 case 'in':
                     if(this.children.length > 0)
-                        this.children[this.children.length>>1].dispatchEvent({'type': 'focus'});
+                        child = this.children[(this.children.length-1)>>1];
                     break;
                 case 'left':
-                    if(this.axis == 0 && this.children[index-1])
-                        this.children[--index].dispatchEvent({'type': 'focus'});
+                    if(this.axis == 0)
+                        child = this.children[index-1];
                     break;
                 case 'right':
-                    if(this.axis == 0 && this.children[index+1])
-                        this.children[++index].dispatchEvent({'type': 'focus'});
+                    if(this.axis == 0)
+                        child = this.children[index+1];
                     break;
                 case 'up':
-                    if(this.axis == 1 && this.children[index-1])
-                        this.children[--index].dispatchEvent({'type': 'focus'});
+                    if(this.axis == 1)
+                        child = this.children[index-1];
                     break;
                 case 'down':
-                    if(this.axis == 1 && this.children[index+1])
-                        this.children[++index].dispatchEvent({'type': 'focus'});
+                    if(this.axis == 1)
+                        child = this.children[index+1];
                     break;
             }
+            for(let d = 0; d < depth && child; ++d)
+                child = child.children && child.children[0];
+            if(child)
+                child.dispatchEvent({'type': 'focus'});
             return true;
         });
     }

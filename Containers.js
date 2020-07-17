@@ -177,10 +177,11 @@ export class RootPanel extends ContainerPanel {
         this.defsNode = Panel.createElement('defs', this.node);
         const blurFilter = Panel.createElement('filter', this.defsNode);
         blurFilter.setAttribute('id', 'blurFilter');
-        blurFilter.setAttribute('x', -10);
-        blurFilter.setAttribute('y', -10);
-        blurFilter.setAttribute('width', 20);
-        blurFilter.setAttribute('height', 20);
+        blurFilter.setAttribute('filterUnits', 'userSpaceOnUse');
+        blurFilter.setAttribute('x', '-100%');
+        blurFilter.setAttribute('y', '-100%');
+        blurFilter.setAttribute('width', '200%');
+        blurFilter.setAttribute('height', '200%');
         const feGaussianBlur = Panel.createElement('feGaussianBlur', blurFilter);
         feGaussianBlur.setAttribute('in', 'SourceGraphic');
         feGaussianBlur.setAttribute('result', 'blur');
@@ -921,11 +922,11 @@ export class TabsViewPanel extends TilingPanel {
         this.tabsContainer.interChildSpacing = 4;
         this.tabsContainer.addEventListener('change', () => {
             if(this.content)
-                this.body.removeChild(this.content);
-            this.content = (this.tabsContainer.activeButton) ? this.tabsContainer.activeButton.content : undefined;
+                this.removeChild(this.content);
+            this.content = (this.tabsContainer.activeButton) ? this.tabsContainer.activeButton.content : this.defaultContent;
             if(this.content)
-                this.body.insertChild(this.content);
-            this.body.updateSize();
+                this.insertChild(this.content);
+            this.recalculateLayout();
         });
         this.registerDropEvent(
             (item) => this.enableTabDragging && item instanceof ButtonPanel && item.backgroundPanel.node.classList.contains('tabHandle'),
@@ -940,8 +941,8 @@ export class TabsViewPanel extends TilingPanel {
                 this.tabsContainer.activeButton = item;
             }
         );
-        this.body = new PanePanel(vec2.create(), vec2.create());
-        this.insertChild(this.body);
+        this.content = this.defaultContent = new PanePanel(vec2.create(), vec2.create());
+        this.insertChild(this.content);
         this.backgroundPanel = new RectPanel(vec2.create(), vec2.create());
         this.backgroundPanel.cornerRadius = 5;
         this.registerFocusEvent(this.backgroundPanel.node);
@@ -958,7 +959,7 @@ export class TabsViewPanel extends TilingPanel {
                     break;
                 case 'in':
                 case 'down':
-                    this.body.dispatchEvent({'type': 'focus'});
+                    this.content.dispatchEvent({'type': 'focus'});
                     break;
                 case 'left':
                     if(this.axis == 1 && this.tabsContainer.children[index-1])

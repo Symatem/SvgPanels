@@ -1247,3 +1247,63 @@ export class SliderPanel extends ContainerPanel {
         this.recalculateLayout();
     }
 }
+
+export class CollapsibleViewPanel extends TilingPanel {
+    constructor(position, size, headerPanel=new LabelPanel(vec2.create())) {
+        super(position, size);
+        this.open = true;
+        this.padding = vec2.fromValues(5, 5);
+        this.axis = 1;
+        this.otherAxisAlignment = -0.5;
+        this.otherAxisSizeStays = true;
+        this.interChildSpacing = 5;
+        this.arrowPanel = new ImagePanel(vec2.create(), vec2.fromValues(10, 10), 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMCAzMCI+PHBhdGggc3R5bGU9ImZpbGw6d2hpdGU7IiBkPSJNMCAyLjVoMzBsLTE1IDI1eiIvPjwvc3ZnPg==');
+        this.arrowPanel.node.classList.add('rotatable');
+        this.headerPanel = headerPanel;
+        this.horizontalSplit = new TilingPanel(vec2.create(), vec2.create());
+        this.horizontalSplit.axis = 0;
+        this.horizontalSplit.interChildSpacing = 5;
+        this.horizontalSplit.insertChild(this.arrowPanel);
+        this.horizontalSplit.insertChild(this.headerPanel);
+        this.horizontalSplit.recalculateLayout();
+        this.insertChild(this.horizontalSplit);
+        this.clippingViewPanel = new ClippingViewPanel(vec2.create(), vec2.create());
+        this.insertChild(this.clippingViewPanel);
+        this.contentPanel = new AdaptiveSizeContainerPanel(vec2.create(), vec2.create());
+        this.clippingViewPanel.insertChild(this.contentPanel);
+        this.registerFocusEvent(this.headerPanel.node);
+        this.registerActionEvent(() => {
+            this.open = !this.open;
+            this.openAnimation = this.arrowPanel.node.animate({
+                'transform': [
+                    `translate(${this.arrowPanel.position[0]}px, ${this.arrowPanel.position[1]}px) rotate(-90deg)`,
+                    `translate(${this.arrowPanel.position[0]}px, ${this.arrowPanel.position[1]}px) rotate(0deg)`,
+                ]
+            }, {
+                'direction': this.open ? 'normal' : 'reverse',
+                'duration': 250,
+                'iterations': 1,
+                'fill': 'both',
+                'easing': 'ease-in-out'
+            });
+            this.openAnimation.onfinish = () => {
+                delete this.openAnimation;
+                this.recalculateLayout();
+            };
+            Panel.animate((timeDiff) => {
+                if(!this.openAnimation)
+                    return false;
+                this.recalculateLayout();
+                return true;
+            });
+        });
+    }
+
+    recalculateLayout() {
+        const factor = (this.openAnimation) ? this.openAnimation.effect.getComputedTiming().progress : this.open ? 1 : 0;
+        this.clippingViewPanel.size[0] = this.size[0];
+        this.clippingViewPanel.size[1] = this.contentPanel.size[1]*factor;
+        this.clippingViewPanel.updateSize();
+        super.recalculateLayout();
+    }
+}

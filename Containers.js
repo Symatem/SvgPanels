@@ -1307,3 +1307,41 @@ export class CollapsibleViewPanel extends TilingPanel {
         super.recalculateLayout();
     }
 }
+
+export class IndexedListPanel extends ScrollViewPanel {
+    constructor(position, size) {
+        super(position, size, new TilingPanel(vec2.create(), vec2.create()));
+        this.contentPanel.axis = 1;
+        this.contentPanel.otherAxisAlignment = 'stretch';
+        this.addEventListener('move', (event) => {
+            const axis = this.contentPanel.axis, viewPos = -this.contentTranslation[axis]-0.5*this.size[axis];
+            let childAtTop;
+            for(const child of this.contentPanel.children)
+                if(child.position[axis]-0.5*child.size[axis] < viewPos && viewPos < child.position[axis]+0.5*child.size[axis]) {
+                    childAtTop = child;
+                    break;
+                }
+            this.setChildAtTop(childAtTop);
+            if(childAtTop) {
+                this.headerPanel.position[axis] = Math.min(viewPos-childAtTop.position[axis]+0.5*this.headerPanel.size[axis], 0.5*childAtTop.size[axis]-0.5*this.headerPanel.size[axis]);
+                this.headerPanel.updatePosition();
+            }
+        });
+    }
+
+    setChildAtTop(childAtTop) {
+        if(this.childAtTop == childAtTop)
+            return;
+        if(this.childAtTop) {
+            this.childAtTop.removeChild(this.headerPanel);
+            this.childAtTop.insertChild(this.headerPanel, 0);
+            this.childAtTop.recalculateLayout();
+        }
+        this.childAtTop = childAtTop;
+        if(childAtTop) {
+            this.headerPanel = childAtTop.children[0];
+            this.childAtTop.removeChild(this.headerPanel);
+            this.childAtTop.insertChild(this.headerPanel);
+        }
+    }
+};

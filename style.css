@@ -200,3 +200,7 @@ rect.toolbarMenuButton:active,rect.toolbarMenuButton.active {
 .slider > rect.sliderBar {
     fill: rgb(83, 125, 191);
 }
+
+.indexedListHeader {
+    fill: rgb(49, 49, 49);
+}

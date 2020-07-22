@@ -1,4 +1,5 @@
-import { vec2, mat2d } from './gl-matrix.js';
+import { vec2, mat2d } from './gl-matrix/src/index.js';
+export { vec2, mat2d };
 
 export class Panel {
     static createElement(tag, parentNode) {

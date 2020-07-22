@@ -1,5 +1,4 @@
-import { vec2, mat2d } from './gl-matrix.js';
-import { Panel } from './Panel.js';
+import { vec2, mat2d, Panel } from './Panel.js';
 import { LabelPanel, RectPanel, SpeechBalloonPanel, TextFieldPanel, ImagePanel } from './Atoms.js';
 
 export class ContainerPanel extends Panel {

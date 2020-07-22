@@ -1,0 +1,8 @@
+{
+    "version": "0.0.1",
+    "name": "SvgPanels",
+    "license": "MIT",
+    "scripts": {
+        "preinstall": "git clone --no-checkout --depth 1 https://github.com/toji/gl-matrix ; cd gl-matrix ; git checkout HEAD -- src ; rm -rf .git"
+    }
+}

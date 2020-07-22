@@ -1,5 +1,4 @@
-import { vec2 } from './gl-matrix.js';
-import { Panel } from './Panel.js';
+import { vec2, Panel } from './Panel.js';
 
 const phantomRoot = Panel.createElement('svg');
 document.body.appendChild(phantomRoot);

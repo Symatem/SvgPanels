@@ -216,6 +216,7 @@ export class Panel {
             if(this.root.focusedPanel)
                 this.root.focusedPanel.dispatchEvent({'type': 'defocus'});
             this.root.focusedPanel = this;
+            this.root.focusedPanel.dispatchEvent({'type': 'moveFocusInView', 'bubbles': true, 'item': this});
         });
         this.addEventListener('defocus', (event) => {
             focusNode.classList.remove('focused');

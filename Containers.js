@@ -76,14 +76,6 @@ export class ContainerPanel extends Panel {
     removeChild(child) {
         if(child.parent != this)
             return false;
-        let panel = this.root.focusedPanel;
-        while(panel) {
-            if(panel == child) {
-                this.root.focusedPanel.dispatchEvent({'type': 'defocus'});
-                break;
-            }
-            panel = panel.parent;
-        }
         delete child.parent;
         child.root = undefined;
         this.children.splice(this.children.indexOf(child), 1);
@@ -1037,6 +1029,7 @@ export class InfiniteViewPanel extends ClippingViewPanel {
         this.scrollSpeed = 0.0;
         this.minScale = 1.0;
         this.maxScale = 1.0;
+        this.focusViewFactor = vec2.fromValues(0.8, 0.8);
         this.addEventListener('pointerzoom', (event) => {
             if(this.scrollSpeed != 0.0 && event.difference) {
                 vec2.scaleAndAdd(event.difference, this.contentTranslation, event.difference, this.scrollSpeed);
@@ -1100,6 +1093,19 @@ export class InfiniteViewPanel extends ClippingViewPanel {
                 delete this.selectionRect;
             } else
                 this.dispatchEvent({'type': 'stoppedmoving'});
+        });
+        this.addEventListener('moveFocusInView', (event) => {
+            const position = vec2.clone(this.contentTranslation);
+            for(let panel = event.item; panel != this; panel = panel.parent)
+                vec2.add(position, position, panel.position);
+            const translation = vec2.clone(this.contentTranslation);
+            for(let i = 0; i < 2; ++i) {
+                if(this.size[i]*this.focusViewFactor[i] <= event.item.size[i])
+                    translation[i] -= position[i];
+                else
+                    translation[i] -= Math.max(0.0, Math.abs(position[i])-(this.size[i]*this.focusViewFactor[i]-event.item.size[i])*0.5)*Math.sign(position[i]);
+            }
+            this.setContentTransformation(translation, this.contentScale);
         });
     }
 

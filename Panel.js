@@ -163,7 +163,7 @@ export class Panel {
     }
 
     registerDragEvent(onDragStart) {
-        this.addEventListener('pointerstart', (event) => {});
+        this.addEventListener('pointerstart', (event) => true);
         this.addEventListener('pointermove', (event) => {
             if(!event.moved) {
                 const root = this.root,
@@ -173,7 +173,7 @@ export class Panel {
                 root.overlays.insertChild(event.item);
                 event.offset = vec2.create();
                 if(Object.getPrototypeOf(this) == Object.getPrototypeOf(event.item))
-                    vec2.sub(event.offset, rootPosition, event.position);
+                    vec2.sub(event.offset, rootPosition, event.startPosition);
                 else
                     vec2.scaleAndAdd(event.offset, event.offset, root.size, -0.5);
             }
@@ -204,7 +204,7 @@ export class Panel {
     }
 
     registerActionEvent(action) {
-        this.addEventListener('pointerstart', (event) => {});
+        this.addEventListener('pointerstart', (event) => true);
         this.addEventListener('action', action);
     }
 
@@ -216,7 +216,7 @@ export class Panel {
             if(this.root.focusedPanel)
                 this.root.focusedPanel.dispatchEvent({'type': 'defocus'});
             this.root.focusedPanel = this;
-            this.root.focusedPanel.dispatchEvent({'type': 'moveFocusInView', 'bubbles': true, 'item': this});
+            this.root.focusedPanel.dispatchEvent({'type': 'movefocusinview', 'bubbles': true, 'source': event.source, 'item': this});
         });
         this.addEventListener('defocus', (event) => {
             focusNode.classList.remove('focused');
@@ -232,6 +232,7 @@ export class Panel {
                 child = child.parent;
             let index = this.children.indexOf(child);
             child = undefined;
+            const indexIncrement = (this.reverse) ? -1 : 1;
             switch(event.direction) {
                 case 'in':
                     if(this.children.length > 0)
@@ -239,19 +240,19 @@ export class Panel {
                     break;
                 case 'left':
                     if(this.axis == 0)
-                        child = this.children[index-1];
+                        child = this.children[index-indexIncrement];
                     break;
                 case 'right':
                     if(this.axis == 0)
-                        child = this.children[index+1];
+                        child = this.children[index+indexIncrement];
                     break;
                 case 'up':
                     if(this.axis == 1)
-                        child = this.children[index-1];
+                        child = this.children[index-indexIncrement];
                     break;
                 case 'down':
                     if(this.axis == 1)
-                        child = this.children[index+1];
+                        child = this.children[index+indexIncrement];
                     break;
             }
             for(let d = 0; d < depth && child; ++d)

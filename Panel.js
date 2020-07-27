@@ -169,13 +169,15 @@ export class Panel {
                 const root = this.root,
                       rootPosition = this.getRootPosition();
                 event.item = onDragStart();
-                event.item.node.classList.add('disabled');
-                root.overlays.insertChild(event.item);
-                event.offset = vec2.create();
-                if(Object.getPrototypeOf(this) == Object.getPrototypeOf(event.item))
-                    vec2.sub(event.offset, rootPosition, event.startPosition);
-                else
-                    vec2.scaleAndAdd(event.offset, event.offset, root.size, -0.5);
+                if(event.item) {
+                    event.item.node.classList.add('disabled');
+                    root.overlays.insertChild(event.item);
+                    event.offset = vec2.create();
+                    if(Object.getPrototypeOf(this) == Object.getPrototypeOf(event.item))
+                        vec2.sub(event.offset, rootPosition, event.startPosition);
+                    else
+                        vec2.scaleAndAdd(event.offset, event.offset, root.size, -0.5);
+                }
             }
             if(event.item) {
                 vec2.add(event.item.position, event.offset, event.position);
@@ -231,30 +233,12 @@ export class Panel {
             for(let d = 0; d < depth && child; ++d)
                 child = child.parent;
             let index = this.children.indexOf(child);
-            child = undefined;
-            const indexIncrement = (this.reverse) ? -1 : 1;
-            switch(event.direction) {
-                case 'in':
-                    if(this.children.length > 0)
-                        child = this.children[(this.children.length-1)>>1];
-                    break;
-                case 'left':
-                    if(this.axis == 0)
-                        child = this.children[index-indexIncrement];
-                    break;
-                case 'right':
-                    if(this.axis == 0)
-                        child = this.children[index+indexIncrement];
-                    break;
-                case 'up':
-                    if(this.axis == 1)
-                        child = this.children[index-indexIncrement];
-                    break;
-                case 'down':
-                    if(this.axis == 1)
-                        child = this.children[index+indexIncrement];
-                    break;
-            }
+            const axis = (event.direction == 'left' || event.direction == 'right') ? 0 : 1,
+                  indexIncrement = (event.direction == 'left' || event.direction == 'up' ? -1 : 1)*(this.reverse ? -1 : 1);
+            if(event.direction != 'in')
+                child = this.children[index+indexIncrement];
+            else if(this.children.length > 0)
+                child = this.children[(this.children.length-1)>>1];
             for(let d = 0; d < depth && child; ++d)
                 child = child.children && child.children[0];
             if(child)

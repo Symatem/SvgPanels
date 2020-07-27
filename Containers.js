@@ -59,15 +59,15 @@ export class ContainerPanel extends Panel {
         } else {
             if(newIndex > this.children.length)
                 return false;
-            child.parent = this;
             child.root = this.root;
+            child.parent = this;
+            child.dispatchEvent({'type': 'parentchange'});
         }
         if(child.node) {
             if(newIndex == this.children.length)
                 this.node.appendChild(child.node);
             else
                 this.node.insertBefore(child.node, this.children[(newIndex == oldIndex+1) ? newIndex+1 : newIndex].node);
-            child.dispatchEvent({'type': 'parentchange'});
         }
         this.children.splice(newIndex, 0, child);
         return true;
@@ -76,13 +76,20 @@ export class ContainerPanel extends Panel {
     removeChild(child) {
         if(child.parent != this)
             return false;
-        delete child.parent;
-        child.root = undefined;
-        this.children.splice(this.children.indexOf(child), 1);
-        if(child.node) {
-            this.node.removeChild(child.node);
-            child.dispatchEvent({'type': 'parentchange'});
+        let panel = this.root && this.root.focusedPanel;
+        while(panel) {
+            if(panel == child) {
+                this.root.focusedPanel.dispatchEvent({'type': 'defocus'});
+                break;
+            }
+            panel = panel.parent;
         }
+        child.root = undefined;
+        delete child.parent;
+        child.dispatchEvent({'type': 'parentchange'});
+        this.children.splice(this.children.indexOf(child), 1);
+        if(child.node)
+            this.node.removeChild(child.node);
         child.resetVisibilityAnimation();
         return true;
     }
@@ -761,7 +768,7 @@ export class ToolbarPanel extends TilingPanel {
 export class ConfigurableSplitViewPanel extends TilingPanel {
     constructor(position, size) {
         super(position, size);
-        this.sizeAlongAxis = 'shrinkToFit';
+        this.sizeAlongAxis = 'centering';
         this.otherAxisSizeStays = true;
         this.otherAxisAlignment = 'stretch';
         this.interChildSpacing = 3;
@@ -869,10 +876,6 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
             }
         }
         super.recalculateLayout();
-    }
-
-    updateSize() {
-        this.recalculateLayout();
     }
 
     normalizeRelativeSizes() {

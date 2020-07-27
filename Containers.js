@@ -202,7 +202,8 @@ export class RootPanel extends ContainerPanel {
         };
         let pointerEvent;
         const distanceToZoom = 300,
-              millisecondsToMove = 100;
+              millisecondsToMove = 100,
+              millisecondsToContext = 300;
         this.node.onmousedown = this.node.ontouchstart = (event) => {
             refineEvent(event);
             pointerEvent = {
@@ -265,7 +266,9 @@ export class RootPanel extends ContainerPanel {
                 pointerEvent.modifierKey = event.modifierKey;
                 pointerEvent.position = event.pointers[0].position;
                 pointerEvent.target.dispatchEvent(pointerEvent);
-            } else
+            } else if(pointerEvent.currentTime-pointerEvent.beginTime > millisecondsToContext)
+                Panel.dispatchEvent({'type': 'toolbarcontext', 'bubbles': true, 'source': 'pointer', 'position': event.pointers[0].position});
+            else
                 pointerEvent.target.dispatchEvent({'type': 'action', 'bubbles': true, 'source': 'pointer', 'position': event.pointers[0].position});
             pointerEvent = undefined;
         };
@@ -676,15 +679,14 @@ export class ToolbarPanel extends TilingPanel {
         return buttonPanel;
     }
 
-    addEntry(menuEntry, topLevel) {
+    generateEntry(menuEntry, topLevel=true) {
         let content = menuEntry.content;
         if(typeof content == 'string')
             content = new LabelPanel(vec2.create(), content);
         const buttonPanel = (menuEntry.children)
-            ? this.generateDropDownMenu(content, menuEntry.children.map(child => this.addEntry(child)))
+            ? this.generateDropDownMenu(content, menuEntry.children.map(child => this.generateEntry(child, false)))
             : this.generateMenuButton(content, menuEntry.shortCut, menuEntry.action);
         if(topLevel) {
-            this.insertChild(buttonPanel, -2);
             buttonPanel.style = 'vertical';
             buttonPanel.recalculateLayout();
         } else if(menuEntry.children) {
@@ -695,9 +697,11 @@ export class ToolbarPanel extends TilingPanel {
     }
 
     addEntries(menuEntries) {
+        menuEntries = menuEntries.map((menuEntry) => this.generateEntry(menuEntry));
         for(const menuEntry of menuEntries)
-            this.addEntry(menuEntry, true);
+            this.insertChild(menuEntry, -2);
         this.recalculateLayout();
+        return menuEntries;
     }
 
     unregisterShortcuts(panel) {
@@ -713,6 +717,17 @@ export class ToolbarPanel extends TilingPanel {
             return false;
         this.unregisterShortcuts(child);
         return true;
+    }
+
+    setContext(event, contextMenuEntry) {
+        if(this.contextPanel != event.target) {
+            this.contextPanel = event.target;
+            if(this.contextMenu)
+                this.removeChild(this.contextMenu);
+            this.contextMenu = (contextMenuEntry) ? this.addEntries([contextMenuEntry])[0] : undefined;
+        }
+        if(this.contextMenu)
+            this.contextMenu.dispatchEvent({'type': 'action', 'source': event.source});
     }
 
     navigateFocus(direction, event) {

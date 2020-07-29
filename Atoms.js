@@ -94,6 +94,10 @@ export class RectPanel extends Panel {
     }
 }
 
+Math.clamp = function(number, min, max) {
+    return Math.max(min, Math.min(number, max));
+};
+
 export class SpeechBalloonPanel extends Panel {
     constructor(position, size) {
         super(position, size, Panel.createElement('path'));
@@ -101,42 +105,57 @@ export class SpeechBalloonPanel extends Panel {
         this.cornerRadiusTopRight = 4;
         this.cornerRadiusBottomLeft = 4;
         this.cornerRadiusBottomRight = 4;
-        this.arrowSize = 10;
-        this.arrowOrigin = vec2.create();
+        this.arrowSide = 'none';
+        this.arrowSize = 0;
+        this.arrowOrigin = 0;
     }
 
     updateSize() {
+        const arrowSizeAbs = Math.abs(this.arrowSize);
+        this.size[0] = Math.max(
+            this.size[0],
+            this.cornerRadiusTopLeft+this.cornerRadiusTopRight+(this.arrowSide == 'top' ? arrowSizeAbs : 0),
+            this.cornerRadiusBottomLeft+this.cornerRadiusBottomRight+(this.arrowSide == 'bottom' ? arrowSizeAbs : 0)
+        );
+        this.size[1] = Math.max(
+            this.size[1],
+            this.cornerRadiusTopLeft+this.cornerRadiusBottomLeft+(this.arrowSide == 'left' ? arrowSizeAbs : 0),
+            this.cornerRadiusTopRight+this.cornerRadiusBottomRight+(this.arrowSide == 'right' ? arrowSizeAbs : 0)
+        );
         super.updateSize();
-        const arrowSizeAbs = Math.abs(this.arrowSize),
-              first = (Math.sqrt(2.0)-1.0)*4.0/3.0,
+        const first = (Math.sqrt(2.0)-1.0)*4.0/3.0,
               second = 1.0-first;
         let data = `M${-0.5*this.size[0]} ${this.cornerRadiusTopLeft-0.5*this.size[1]}`
         if(this.cornerRadiusTopLeft > 0)
             data += `c0 ${-this.cornerRadiusTopLeft*first} ${this.cornerRadiusTopLeft*second} ${-this.cornerRadiusTopLeft} ${this.cornerRadiusTopLeft} ${-this.cornerRadiusTopLeft}`;
-        if(this.arrowOrigin[1] == -this.size[1]*0.5) {
-            const length = 0.5*this.size[0]-arrowSizeAbs;
-            data += `h${length+this.arrowOrigin[0]-this.cornerRadiusTopLeft}l${arrowSizeAbs} ${-this.arrowSize}l${arrowSizeAbs} ${this.arrowSize}h${length-this.arrowOrigin[0]-this.cornerRadiusTopRight}`;
+        if(this.arrowSide == 'top') {
+            const length = 0.5*this.size[0]-arrowSizeAbs,
+                  arrowOrigin = Math.clamp(this.arrowOrigin, this.cornerRadiusTopLeft-length, length-this.cornerRadiusTopRight);
+            data += `h${length+arrowOrigin-this.cornerRadiusTopLeft}l${arrowSizeAbs} ${-this.arrowSize}l${arrowSizeAbs} ${this.arrowSize}h${length-arrowOrigin-this.cornerRadiusTopRight}`;
         } else
             data += `h${this.size[0]-this.cornerRadiusTopLeft-this.cornerRadiusTopRight}`;
         if(this.cornerRadiusTopRight > 0)
             data += `c${this.cornerRadiusTopRight*first} 0 ${this.cornerRadiusTopRight} ${this.cornerRadiusTopRight*second} ${this.cornerRadiusTopRight} ${this.cornerRadiusTopRight}`;
-        if(this.arrowOrigin[0] == this.size[0]*0.5) {
-            const length = 0.5*this.size[1]-arrowSizeAbs;
-            data += `v${length+this.arrowOrigin[1]-this.cornerRadiusTopRight}l${this.arrowSize} ${arrowSizeAbs}l${-this.arrowSize} ${arrowSizeAbs}v${length-this.arrowOrigin[1]-this.cornerRadiusBottomRight}`;
+        if(this.arrowSide == 'right') {
+            const length = 0.5*this.size[1]-arrowSizeAbs,
+                  arrowOrigin = Math.clamp(this.arrowOrigin, this.cornerRadiusTopRight-length, length-this.cornerRadiusBottomRight);
+            data += `v${length+arrowOrigin-this.cornerRadiusTopRight}l${this.arrowSize} ${arrowSizeAbs}l${-this.arrowSize} ${arrowSizeAbs}v${length-arrowOrigin-this.cornerRadiusBottomRight}`;
         } else
             data += `v${this.size[1]-this.cornerRadiusTopRight-this.cornerRadiusBottomRight}`;
         if(this.cornerRadiusBottomRight > 0)
             data += `c0 ${this.cornerRadiusBottomRight*first} ${-this.cornerRadiusBottomRight*second} ${this.cornerRadiusBottomRight} ${-this.cornerRadiusBottomRight} ${this.cornerRadiusBottomRight}`;
-        if(this.arrowOrigin[1] == this.size[1]*0.5) {
-            const length = arrowSizeAbs-0.5*this.size[0];
-            data += `h${length+this.arrowOrigin[0]+this.cornerRadiusBottomRight}l${-arrowSizeAbs} ${this.arrowSize}l${-arrowSizeAbs} ${-this.arrowSize}h${length-this.arrowOrigin[0]+this.cornerRadiusBottomLeft}`;
+        if(this.arrowSide == 'bottom') {
+            const length = arrowSizeAbs-0.5*this.size[0],
+                  arrowOrigin = Math.clamp(this.arrowOrigin, this.cornerRadiusBottomLeft+length, -length-this.cornerRadiusBottomRight);
+            data += `h${length+arrowOrigin+this.cornerRadiusBottomRight}l${-arrowSizeAbs} ${this.arrowSize}l${-arrowSizeAbs} ${-this.arrowSize}h${length-arrowOrigin+this.cornerRadiusBottomLeft}`;
         } else
             data += `h${this.cornerRadiusBottomLeft+this.cornerRadiusBottomRight-this.size[0]}`;
         if(this.cornerRadiusBottomLeft > 0)
             data += `c${-this.cornerRadiusBottomLeft*first} 0 ${-this.cornerRadiusBottomLeft} ${-this.cornerRadiusBottomLeft*second} ${-this.cornerRadiusBottomLeft} ${-this.cornerRadiusBottomLeft}`;
-        if(this.arrowOrigin[0] == -this.size[0]*0.5) {
-            const length = arrowSizeAbs-0.5*this.size[1];
-            data += `v${length+this.arrowOrigin[1]+this.cornerRadiusBottomLeft}l${-this.arrowSize} ${-arrowSizeAbs}l${this.arrowSize} ${-arrowSizeAbs}z`;
+        if(this.arrowSide == 'left') {
+            const length = arrowSizeAbs-0.5*this.size[1],
+                  arrowOrigin = Math.clamp(this.arrowOrigin, this.cornerRadiusTopLeft+length, -length-this.cornerRadiusBottomLeft);
+            data += `v${length+arrowOrigin+this.cornerRadiusBottomLeft}l${-this.arrowSize} ${-arrowSizeAbs}l${this.arrowSize} ${-arrowSizeAbs}z`;
         } else
             data += 'z'; // `v${this.cornerRadiusBottomLeft+this.cornerRadiusTopLeft-this.size[1]}`;
         this.node.setAttribute('d', data);

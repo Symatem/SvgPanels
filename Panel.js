@@ -233,11 +233,13 @@ export class Panel {
             for(let d = 0; d < depth && child; ++d)
                 child = child.parent;
             let index = this.children.indexOf(child);
-            const axis = (event.direction == 'left' || event.direction == 'right') ? 0 : 1,
-                  indexIncrement = (event.direction == 'left' || event.direction == 'up' ? -1 : 1)*(this.reverse ? -1 : 1);
-            if(event.direction != 'in')
+            if(event.direction != 'in') {
+                const axis = (event.direction == 'left' || event.direction == 'right') ? 0 : 1,
+                      indexIncrement = (event.direction == 'left' || event.direction == 'up' ? -1 : 1)*(this.reverse ? -1 : 1);
+                if(this.axis != axis)
+                    return false;
                 child = this.children[index+indexIncrement];
-            else if(this.children.length > 0)
+            } else if(this.children.length > 0)
                 child = this.children[(this.children.length-1)>>1];
             for(let d = 0; d < depth && child; ++d)
                 child = child.children && child.children[0];

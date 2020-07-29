@@ -94,6 +94,23 @@ export class ContainerPanel extends Panel {
         return true;
     }
 
+    replaceChild(child, newChild) {
+        if(child == newChild || child.parent != this)
+            return false;
+        vec2.copy(newChild.position, child.position);
+        vec2.copy(newChild.size, child.size);
+        newChild.updatePosition();
+        newChild.updateSize();
+        const index = this.children.indexOf(child),
+              hadFocus = this.root && (this.root.focusedPanel == child || this.root.focusedPanel == newChild);
+        if(!this.removeChild(child) || (newChild.parent && !newChild.parent.removeChild(newChild)))
+            return false;
+        this.insertChild(newChild, index);
+        if(hadFocus)
+            newChild.dispatchEvent({'type': 'focus'});
+        return true;
+    }
+
     insertChildAnimated(child, newIndex=-1) {
         if(!this.insertChild(child, newIndex))
             return false;
@@ -427,6 +444,49 @@ export class PanePanel extends ClippingViewPanel {
             }
             return true;
         });
+        this.addEventListener('toolbarcontext', (event) => {
+            if(this.root && this.root.toolBarPanel)
+                this.root.toolBarPanel.setContext(event);
+        });
+        this.addEventListener('layoutsplit', (event) => {
+            const childToInsert = new PanePanel(vec2.create(), vec2.create()),
+                  relativeSize = 0.5;
+            if(this.parent instanceof ConfigurableSplitViewPanel && this.parent.axis == event.direction)
+                this.parent.splitChild(this.parent.children.indexOf(this), false, relativeSize, childToInsert);
+            else {
+                let container;
+                if(event.direction == 2) {
+                    if(this.parent instanceof TabsViewPanel) {
+                        container = this.parent;
+                        const hadFocus = (this.root.focusedPanel == this),
+                              tab = container.createTab(undefined, childToInsert);
+                        if(hadFocus)
+                            childToInsert.dispatchEvent({'type': 'focus'});
+                        return;
+                    }
+                    container = new TabsViewPanel(vec2.create(), vec2.create(), childToInsert);
+                } else {
+                    container = new ConfigurableSplitViewPanel(vec2.create(), vec2.create());
+                    container.axis = event.direction;
+                }
+                this.parent.replaceChild(this, container);
+                if(event.direction == 2) {
+                    const tab = container.createTab(undefined, this);
+                } else {
+                    this.relativeSize = 1.0-relativeSize;
+                    childToInsert.relativeSize = relativeSize;
+                    container.insertChild(this);
+                    container.insertChild(childToInsert);
+                }
+                container.recalculateLayout();
+            }
+        });
+        this.registerDropEvent(
+            (tabHandle) => tabHandle instanceof ButtonPanel && tabHandle.backgroundPanel.node.classList.contains('tabHandle'),
+            (tabHandle) => {
+                this.parent.replaceChild(this, tabHandle.content);
+            }
+        );
     }
 
     updateSize() {
@@ -763,6 +823,12 @@ export class ToolbarPanel extends TilingPanel {
                 break;
         }
     }
+
+    changeLayout(type, direction, event) {
+        const target = this.root.focusedPanel || this.contextPanel;
+        if(target)
+            target.dispatchEvent({'type': type, 'source': event.source, 'bubbles': true, 'direction': direction});
+    }
 }
 
 export class ConfigurableSplitViewPanel extends TilingPanel {
@@ -790,25 +856,20 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
                     if(event.splitIndex == 0)
                         return false;
                     event.mode = 'insertBefore';
+                    return true;
                 } else if(event.position[1-this.axis] < this.splitHandleSize-sizeOtherAxis) {
                     if(event.splitIndex == this.children.length)
                         return false;
                     event.mode = 'insertAfter';
+                    return true;
                 }
-                return true;
-            } else
-                return event.splitIndex > 0 || event.splitIndex < this.children.length;
+            }
+            return event.splitIndex > 0 && event.splitIndex < this.children.length;
         });
         this.addEventListener('pointermove', (event) => {
             if(!event.moved) {
                 if(event.mode != 'move') {
-                    const childToSplit = this.children[event.mode == 'insertBefore' ? event.splitIndex-1 : event.splitIndex];
-                    childToSplit.size[this.axis] -= this.interChildSpacing;
-                    const childToInsert = new PanePanel(vec2.create(), vec2.create());
-                    childToInsert.relativeSize = 0.0;
-                    this.insertChild(childToInsert, event.splitIndex);
-                    this.normalizeRelativeSizes();
-                    this.recalculateLayout();
+                    this.splitChild(event.splitIndex, event.mode == 'insertBefore', 0.0);
                     if(event.mode == 'insertAfter')
                         ++event.splitIndex;
                 }
@@ -835,27 +896,19 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
             event.nextChild.relativeSize = event.relativeSizeSum-event.prevChild.relativeSize;
         });
         this.addEventListener('pointerend', (event) => {
-            const smallerChild = (event.prevChild.relativeSize < event.nextChild.relativeSize) ? event.prevChild : event.nextChild;
-            if(this.enableSplitAndMerge && smallerChild.size[this.axis] < this.mergeSizeThreshold) {
-                const otherChild = (smallerChild == event.nextChild) ? event.prevChild : event.nextChild;
-                otherChild.size[this.axis] += smallerChild.size[this.axis]+this.interChildSpacing;
-                otherChild.updateSize();
-                otherChild.position[this.axis] += (smallerChild.size[this.axis]+this.interChildSpacing)*(smallerChild == event.nextChild ? 0.5 : -0.5);
-                otherChild.updatePosition();
-                this.removeChild(smallerChild);
-                if(this.children.length == 1) {
-                    const child = this.children[0],
-                          parent = this.parent,
-                          index = parent.children.indexOf(this);
-                    super.removeChild(child);
-                    parent.insertChild(child, index);
-                    parent.removeChild(this);
-                    parent.recalculateLayout();
-                }
-            }
+            const childToMerge = (event.prevChild.relativeSize < event.nextChild.relativeSize) ? event.prevChild : event.nextChild;
+            if(this.enableSplitAndMerge && childToMerge.size[this.axis] < this.mergeSizeThreshold)
+                this.mergeChildren(this.children.indexOf(childToMerge), childToMerge == event.nextChild);
         });
         this.registerFocusEvent(this.backgroundPanel.node);
         this.registerFocusNavigationEvent();
+        this.addEventListener('layoutreplace', (event) => {
+            const axis = (event.direction == 'left' || event.direction == 'right') ? 0 : 1,
+                  indexIncrement = (event.direction == 'left' || event.direction == 'up' ? -1 : 1)*(this.reverse ? -1 : 1),
+                  index = this.children.indexOf(event.originalTarget)+indexIncrement;
+            if(this.axis == axis && this.children[index])
+                this.mergeChildren(index, indexIncrement == 1);
+        });
     }
 
     recalculateLayout() {
@@ -886,10 +939,47 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
             child.relativeSize = child.size[this.axis]/childSizeSum;
     }
 
-    removeChild(child) {
-        if(!super.removeChild(child))
-            return false;
+    splitChild(index, before, relativeSize, childToInsert=new PanePanel(vec2.create(), vec2.create())) {
+        const childToSplit = this.children[before ? index-1 : index],
+              sizeToSplit = childToSplit.size[this.axis]-this.interChildSpacing;
+        let translation = childToSplit.size[this.axis];
+        this.insertChild(childToInsert, index);
+        childToInsert.size[this.axis] = sizeToSplit*relativeSize;
+        childToInsert.size[1-this.axis] = childToSplit.size[1-this.axis];
+        childToSplit.size[this.axis] = sizeToSplit-childToInsert.size[this.axis];
+        childToSplit.updateSize();
+        childToInsert.updateSize();
+        translation = (childToSplit.size[this.axis]-translation)*(before ? -0.5 : 0.5);
+        childToInsert.position[this.axis] = childToSplit.position[this.axis];
+        childToInsert.position[1-this.axis] = childToSplit.position[1-this.axis];
+        childToInsert.position[this.axis] += translation;
+        childToSplit.position[this.axis] -= translation;
+        childToInsert.position[this.axis] = childToSplit.position[this.axis]+(sizeToSplit*0.5+this.interChildSpacing)*(before ? 1 : -1);
+        childToSplit.updatePosition();
+        childToInsert.updatePosition();
         this.normalizeRelativeSizes();
+    }
+
+    mergeChildren(index, before) {
+        const childToMergeInto = this.children[before ? index-1 : index+1],
+              childToMerge = this.children[index];
+        childToMergeInto.size[this.axis] += childToMerge.size[this.axis]+this.interChildSpacing;
+        childToMergeInto.updateSize();
+        childToMergeInto.position[this.axis] += (childToMerge.size[this.axis]+this.interChildSpacing)*(before ? 0.5 : -0.5);
+        childToMergeInto.updatePosition();
+        this.removeChild(childToMerge);
+        if(this.children.length == 1)
+            this.parent.replaceChild(this, this.children[0]);
+        else
+            this.normalizeRelativeSizes();
+    }
+
+    replaceChild(child, newChild) {
+        if(!super.replaceChild(child, newChild))
+            return false;
+        newChild.relativeSize = child.relativeSize;
+        this.normalizeRelativeSizes();
+        delete child.relativeSize;
         return true;
     }
 }
@@ -933,13 +1023,13 @@ export class RadioButtonsPanel extends TilingPanel {
 }
 
 export class TabsViewPanel extends TilingPanel {
-    constructor(position, size) {
+    constructor(position, size, defaultContent) {
         super(position, size);
         this.axis = 1;
         this.sizeAlongAxis = -1;
         this.otherAxisSizeStays = true;
         this.otherAxisAlignment = 'stretch';
-        this.enableTabDragging = false;
+        this.enableTabDragging = true;
         this.header = new ClippingViewPanel(vec2.create(), vec2.create());
         this.header.registerActionEvent(() => {
             this.tabsContainer.activeButton = undefined;
@@ -950,28 +1040,21 @@ export class TabsViewPanel extends TilingPanel {
         this.tabsContainer.axis = 1-this.axis;
         this.tabsContainer.interChildSpacing = 4;
         this.tabsContainer.addEventListener('change', () => {
-            if(this.content)
-                this.removeChild(this.content);
-            this.content = (this.tabsContainer.activeButton) ? this.tabsContainer.activeButton.content : this.defaultContent;
-            if(this.content)
-                this.insertChild(this.content);
-            this.recalculateLayout();
+            this.replaceChild(this.children[1], (this.tabsContainer.activeButton) ? this.tabsContainer.activeButton.content : this.defaultContent);
         });
         this.registerDropEvent(
-            (item) => this.enableTabDragging && item instanceof ButtonPanel && item.backgroundPanel.node.classList.contains('tabHandle'),
-            (item) => {
+            (tabHandle) => this.enableTabDragging && tabHandle instanceof ButtonPanel && tabHandle.backgroundPanel.node.classList.contains('tabHandle'),
+            (tabHandle) => {
                 let index = 0;
                 const containerPosition = this.tabsContainer.getRootPosition();
-                vec2.sub(containerPosition, item.position, containerPosition);
+                vec2.sub(containerPosition, tabHandle.position, containerPosition);
                 while(index < this.tabsContainer.children.length && this.tabsContainer.children[index].position[this.tabsContainer.axis] < containerPosition[this.tabsContainer.axis])
                     ++index;
-                this.tabsContainer.insertChild(item, index);
-                this.tabsContainer.recalculateLayout();
-                this.tabsContainer.activeButton = item;
+                this.addTab(tabHandle, true, index);
             }
         );
-        this.content = this.defaultContent = new PanePanel(vec2.create(), vec2.create());
-        this.insertChild(this.content);
+        this.defaultContent = defaultContent;
+        this.insertChild(this.defaultContent);
         this.backgroundPanel = new RectPanel(vec2.create(), vec2.create());
         this.backgroundPanel.cornerRadius = 5;
         this.registerFocusEvent(this.backgroundPanel.node);
@@ -988,7 +1071,7 @@ export class TabsViewPanel extends TilingPanel {
                     break;
                 case 'in':
                 case 'down':
-                    this.content.dispatchEvent({'type': 'focus'});
+                    this.children[1].dispatchEvent({'type': 'focus'});
                     break;
                 case 'left':
                     if(this.axis == 1 && this.tabsContainer.children[index-1])
@@ -1003,12 +1086,23 @@ export class TabsViewPanel extends TilingPanel {
         });
     }
 
+    replaceChild(child, newChild) {
+        if(child != this.children[1] || !super.replaceChild(child, newChild))
+            return false;
+        if(this.tabsContainer.activeButton) {
+            this.tabsContainer.activeButton.content = newChild;
+        } else if(newChild != this.defaultContent) {
+            const tabHandle = this.createTab(undefined, newChild);
+        }
+        return true;
+    }
+
     recalculateLayout() {
         if(this.tabsContainer.axis != 1-this.axis) {
             this.tabsContainer.axis = 1-this.axis;
             this.tabsContainer.recalculateLayout();
             for(const tabHandle of this.tabsContainer.children) {
-                this.updateTabHandleCorners(tabHandle);
+                this.updateTabHandleLayout(tabHandle);
                 tabHandle.backgroundPanel.updateSize();
             }
         }
@@ -1017,33 +1111,21 @@ export class TabsViewPanel extends TilingPanel {
         super.recalculateLayout();
     }
 
-    updateTabHandleCorners(tabHandle) {
-        tabHandle.backgroundPanel.cornerRadiusTopLeft = tabHandle.backgroundPanel.cornerRadius;
-        if(this.tabsContainer.axis == 0) {
-            tabHandle.backgroundPanel.cornerRadiusTopRight = tabHandle.backgroundPanel.cornerRadius;
-            tabHandle.backgroundPanel.cornerRadiusBottomLeft = 0;
-        } else {
-            tabHandle.backgroundPanel.cornerRadiusTopRight = 0;
-            tabHandle.backgroundPanel.cornerRadiusBottomLeft = tabHandle.backgroundPanel.cornerRadius;
-        }
-        tabHandle.backgroundPanel.cornerRadiusBottomRight = 0;
-    }
-
-    addTab() {
-        const tabHandle = new ButtonPanel(vec2.create(), 'tabHandle', new SpeechBalloonPanel(vec2.create(), vec2.create()));
-        this.tabsContainer.insertChild(tabHandle);
-        this.updateTabHandleCorners(tabHandle);
-        tabHandle.padding = vec2.fromValues(11, 3);
-        tabHandle.registerActionEvent(() => {
-            this.tabsContainer.activeButton = tabHandle;
-        });
-        tabHandle.registerDragEvent(() => {
-            if(!this.enableTabDragging)
-                return;
-            this.removeTab(tabHandle);
-            return tabHandle;
-        });
-        return tabHandle;
+    updateTabHandleLayout(tabHandle) {
+        tabHandle.padding = (this.axis == 0) ? vec2.fromValues(3, 11) : vec2.fromValues(11, 3);
+        const cornerRadius = this.reverse
+            ? (this.tabsContainer.axis == 0
+                ? [0, 0, tabHandle.backgroundPanel.cornerRadius, tabHandle.backgroundPanel.cornerRadius]
+                : [0, tabHandle.backgroundPanel.cornerRadius, 0, tabHandle.backgroundPanel.cornerRadius]
+            )
+            : (this.tabsContainer.axis == 0
+                ? [tabHandle.backgroundPanel.cornerRadius, tabHandle.backgroundPanel.cornerRadius, 0, 0]
+                : [tabHandle.backgroundPanel.cornerRadius, 0, tabHandle.backgroundPanel.cornerRadius, 0]
+            );
+        tabHandle.backgroundPanel.cornerRadiusTopLeft = cornerRadius[0];
+        tabHandle.backgroundPanel.cornerRadiusTopRight = cornerRadius[1];
+        tabHandle.backgroundPanel.cornerRadiusBottomLeft = cornerRadius[2];
+        tabHandle.backgroundPanel.cornerRadiusBottomRight = cornerRadius[3];
     }
 
     removeTab(tabHandle) {
@@ -1051,6 +1133,39 @@ export class TabsViewPanel extends TilingPanel {
             return false;
         this.tabsContainer.recalculateLayout();
         return true;
+    }
+
+    addTab(tabHandle, activate, index) {
+        this.updateTabHandleLayout(tabHandle);
+        tabHandle.registerActionEvent(() => {
+            this.tabsContainer.activeButton = tabHandle;
+        });
+        tabHandle.registerDragEvent(() => {
+            if(!this.enableTabDragging)
+                return;
+            this.removeTab(tabHandle);
+            if(this.tabsContainer.children.length == 0)
+                this.parent.replaceChild(this, this.defaultContent);
+            return tabHandle;
+        });
+        tabHandle.recalculateLayout();
+        this.tabsContainer.insertChild(tabHandle, index);
+        if(activate) {
+            this.tabsContainer.recalculateLayout();
+            this.tabsContainer.activeButton = tabHandle;
+        }
+    }
+
+    createTab(tabLabel, content, activate=true) {
+        const tabHandle = new ButtonPanel(vec2.create(), 'tabHandle', new SpeechBalloonPanel(vec2.create(), vec2.create()));
+        if(!tabLabel) {
+            tabLabel = new LabelPanel(vec2.create());
+            tabLabel.text = 'Tab';
+        }
+        tabHandle.insertChild(tabLabel);
+        tabHandle.content = content;
+        this.addTab(tabHandle, activate);
+        return tabHandle;
     }
 }
 

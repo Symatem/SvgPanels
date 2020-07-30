@@ -103,8 +103,9 @@ export class ContainerPanel extends Panel {
         newChild.updateSize();
         const index = this.children.indexOf(child),
               hadFocus = this.root && (this.root.focusedPanel == child || this.root.focusedPanel == newChild);
-        if(!this.removeChild(child) || (newChild.parent && !newChild.parent.removeChild(newChild)))
-            return false;
+        this.removeChild(child);
+        if(newChild.parent)
+            newChild.parent.removeChild(newChild);
         this.insertChild(newChild, index);
         if(hadFocus)
             newChild.dispatchEvent({'type': 'focus'});
@@ -133,19 +134,6 @@ export class ContainerPanel extends Panel {
                 result.add(child);
         return result;
     }
-
-    setAllChildrenSelected(selected) {
-        for(const child of this.children) {
-            child.selected = selected;
-            if(child.setAllChildrenSelected)
-                child.setAllChildrenSelected(selected);
-        }
-    }
-
-    selectChildrenInside(min, max, toggle) {
-        for(const child of this.children)
-            child.selectIfInside(min, max, toggle);
-    }
 }
 
 const keyModifiers = ['alt', 'ctrl', 'meta', 'shift'],
@@ -159,12 +147,10 @@ function refineEvent(event) {
         event.preventDefault();
     event.stopPropagation();
     if(event.touches) {
-        event.modifierKey = (event.touches.length === 2);
+        event.shiftKey = (event.touches.length === 2);
         event.pointers = event.changedTouches;
-    } else {
-        event.modifierKey = event.shiftKey;
+    } else
         event.pointers = [event];
-    }
     for(const pointer of event.pointers)
         pointer.position = vec2.fromValues(pointer.clientX, pointer.clientY);
 }
@@ -218,7 +204,7 @@ export class RootPanel extends ContainerPanel {
             refineEvent(event);
             Panel.dispatchEvent({
                 'type': 'pointerzoom',
-                'bubbles': true,
+                'propagateTo': 'parent',
                 'source': 'wheel',
                 'position': event.pointers[0].position,
                 'difference': vec2.fromValues(event.deltaX, event.deltaY)
@@ -232,13 +218,14 @@ export class RootPanel extends ContainerPanel {
             refineEvent(event);
             pointerEvent = {
                 'type': 'pointerstart',
-                'bubbles': true,
+                'propagateTo': 'parent',
                 'source': 'pointer',
-                'modifierKey': event.modifierKey,
+                'shiftKey': event.shiftKey,
                 'position': event.pointers[0].position,
                 'moved': false,
                 'beginTime': performance.now()
             };
+            pointerEvent.currentTime = pointerEvent.beginTime;
             if(event.touches) {
                 pointerEvent.primaryTouchID = event.touches[0].identifier;
                 pointerEvent.zoomPointerDifference = dualPointerDifference(event);
@@ -249,7 +236,6 @@ export class RootPanel extends ContainerPanel {
             if(Panel.dispatchEvent(pointerEvent)) {
                 pointerEvent.target = pointerEvent.target || pointerEvent.originalTarget;
                 pointerEvent.startPosition = pointerEvent.position;
-                delete pointerEvent.bubbles;
             } else
                 pointerEvent = undefined;
         };
@@ -257,10 +243,12 @@ export class RootPanel extends ContainerPanel {
             refineEvent(event);
             if(!pointerEvent)
                 return;
-            pointerEvent.currentTime = performance.now();
+            const now = performance.now();
+            pointerEvent.timeDiff = now-pointerEvent.currentTime;
+            pointerEvent.currentTime = now;
             if(pointerEvent.currentTime-pointerEvent.beginTime < millisecondsToMove)
                 return;
-            pointerEvent.modifierKey = event.modifierKey;
+            pointerEvent.shiftKey = event.shiftKey;
             if(pointerEvent.zoomPointerDifference) {
                 const dist = dualPointerDifference(event);
                 if(vec2.length(dist) > 0 && onZoom) {
@@ -284,16 +272,16 @@ export class RootPanel extends ContainerPanel {
             refineEvent(event);
             if(!pointerEvent || (event.touches && event.touches.length > 0 && pointerEvent.primaryTouchID != event.changedTouches[0].identifier))
                 return;
-            pointerEvent.currentTime = performance.now();
+            const now = performance.now();
+            pointerEvent.timeDiff = now-pointerEvent.currentTime;
+            pointerEvent.currentTime = now;
             if(pointerEvent.moved) {
                 pointerEvent.type = 'pointerend';
-                pointerEvent.modifierKey = event.modifierKey;
+                pointerEvent.shiftKey = event.shiftKey;
                 pointerEvent.position = event.pointers[0].position;
                 pointerEvent.target.dispatchEvent(pointerEvent);
-            } else if(pointerEvent.currentTime-pointerEvent.beginTime > millisecondsToContext)
-                Panel.dispatchEvent({'type': 'toolbarcontext', 'bubbles': true, 'source': 'pointer', 'position': event.pointers[0].position});
-            else
-                pointerEvent.target.dispatchEvent({'type': 'action', 'bubbles': true, 'source': 'pointer', 'position': event.pointers[0].position});
+            } else
+                pointerEvent.target.actionOrSelect(pointerEvent);
             pointerEvent = undefined;
         };
     }
@@ -444,12 +432,17 @@ export class PanePanel extends ClippingViewPanel {
             }
             return true;
         });
+        this.addEventListener('pointerstart', (event) => true);
         this.addEventListener('toolbarcontext', (event) => {
             if(this.root && this.root.toolBarPanel)
-                this.root.toolBarPanel.setContext(event);
+                this.root.toolBarPanel.setContext(event, {'content': 'Context', 'children': this.constructor.paneTypes.map(entry => (
+                    {'content': entry.name, 'shortCut': entry.shortCut, 'action': (event) => {
+                        this.parent.replaceChild(this, new entry.class(vec2.create()));
+                    }}
+                ))});
         });
         this.addEventListener('layoutsplit', (event) => {
-            const childToInsert = new PanePanel(vec2.create(), vec2.create()),
+            const childToInsert = new PanePanel(vec2.create(), vec2.create(), true),
                   relativeSize = 0.5;
             if(this.parent instanceof ConfigurableSplitViewPanel && this.parent.axis == event.direction)
                 this.parent.splitChild(this.parent.children.indexOf(this), false, relativeSize, childToInsert);
@@ -458,21 +451,23 @@ export class PanePanel extends ClippingViewPanel {
                 if(event.direction == 2) {
                     if(this.parent instanceof TabsViewPanel) {
                         container = this.parent;
-                        const hadFocus = (this.root.focusedPanel == this),
-                              tab = container.createTab(undefined, childToInsert);
+                        const hadFocus = (this.root.focusedPanel == this);
+                        container.addTab(new TabPanel(childToInsert), true);
                         if(hadFocus)
                             childToInsert.dispatchEvent({'type': 'focus'});
+                        childToInsert.dispatchEvent({'type': 'toolbarcontext'});
                         return;
+                    } else {
+                        container = new TabsViewPanel(vec2.create(), vec2.create());
+                        container.addTab(new TabPanel(this), false);
+                        container.addTab(new TabPanel(childToInsert), true);
                     }
-                    container = new TabsViewPanel(vec2.create(), vec2.create(), childToInsert);
                 } else {
                     container = new ConfigurableSplitViewPanel(vec2.create(), vec2.create());
                     container.axis = event.direction;
                 }
                 this.parent.replaceChild(this, container);
-                if(event.direction == 2) {
-                    const tab = container.createTab(undefined, this);
-                } else {
+                if(event.direction < 2) {
                     this.relativeSize = 1.0-relativeSize;
                     childToInsert.relativeSize = relativeSize;
                     container.insertChild(this);
@@ -480,9 +475,10 @@ export class PanePanel extends ClippingViewPanel {
                 }
                 container.recalculateLayout();
             }
+            childToInsert.dispatchEvent({'type': 'toolbarcontext'});
         });
         this.registerDropEvent(
-            (tabHandle) => tabHandle instanceof ButtonPanel && tabHandle.backgroundPanel.node.classList.contains('tabHandle'),
+            (tabHandle) => tabHandle instanceof TabPanel,
             (tabHandle) => {
                 this.parent.replaceChild(this, tabHandle.content);
             }
@@ -495,6 +491,11 @@ export class PanePanel extends ClippingViewPanel {
             vec2.copy(child.size, this.size);
             child.updateSize();
         }
+    }
+
+    static registerPaneType(cls, name, shortCut) {
+        const paneTypes = PanePanel.paneTypes || (PanePanel.paneTypes = []);
+        paneTypes.push({'class': cls, 'name': name, 'shortCut': shortCut});
     }
 }
 
@@ -793,8 +794,6 @@ export class ToolbarPanel extends TilingPanel {
                 this.removeChild(this.contextMenu);
             this.contextMenu = (contextMenuEntry) ? this.addEntries([contextMenuEntry])[0] : undefined;
         }
-        if(this.contextMenu)
-            this.contextMenu.dispatchEvent({'type': 'action', 'source': event.source});
     }
 
     navigateFocus(direction, event) {
@@ -807,27 +806,32 @@ export class ToolbarPanel extends TilingPanel {
                 if(!this.root.focusedPanel)
                     this.dispatchEvent({'type': 'focus', 'source': event.source});
                 else if(!this.root.focusedPanel.dispatchEvent({'type': 'focusnavigation', 'source': event.source, 'direction': 'in'}))
-                    this.root.focusedPanel.dispatchEvent({'type': 'action', 'source': event.source});
+                    this.root.focusedPanel.actionOrSelect(event);
                 break;
             case 'out':
                 if(this.root.focusedPanel && this.root.focusedPanel.parent) {
                     if(this.root.focusedPanel.parent.parent == this.root.overlays)
                         this.root.closeModalOverlay(event, this.root.focusedPanel.parent);
                     else
-                        this.root.focusedPanel.parent.dispatchEvent({'type': 'focus', 'source': event.source, 'bubbles': true});
+                        this.root.focusedPanel.parent.dispatchEvent({'type': 'focus', 'source': event.source, 'propagateTo': 'parent'});
                 }
                 break;
             default:
                 if(this.root.focusedPanel && this.root.focusedPanel.parent)
-                    this.root.focusedPanel.parent.dispatchEvent({'type': 'focusnavigation', 'source': event.source, 'bubbles': true, 'direction': direction});
+                    this.root.focusedPanel.parent.dispatchEvent({'type': 'focusnavigation', 'source': event.source, 'propagateTo': 'parent', 'direction': direction});
                 break;
         }
     }
 
-    changeLayout(type, direction, event) {
+    focusOrContextEvent(type, protoEvent, event) {
         const target = this.root.focusedPanel || this.contextPanel;
         if(target)
-            target.dispatchEvent({'type': type, 'source': event.source, 'bubbles': true, 'direction': direction});
+            target.dispatchEvent(Object.assign({'type': type, 'source': event.source}, protoEvent));
+    }
+
+    contextSelect(mode, event) {
+        if(this.contextPanel)
+            this.contextPanel.dispatchEvent({'type': 'select', 'mode': mode, 'source': event.source, 'propagateTo': 'children'});
     }
 }
 
@@ -1001,9 +1005,11 @@ export class RadioButtonsPanel extends TilingPanel {
     }
 
     removeChild(child) {
+        if(!super.removeChild(child))
+            return false;
         if(child == this._activeButton)
             this.activeButton = undefined;
-        return super.removeChild(child);
+        return true;
     }
 
     get activeButton() {
@@ -1022,8 +1028,21 @@ export class RadioButtonsPanel extends TilingPanel {
     }
 }
 
+export class TabPanel extends ButtonPanel {
+    constructor(content, tabLabel='Tab') {
+        super(vec2.create(), 'tabHandle', new SpeechBalloonPanel(vec2.create(), vec2.create()));
+        if(typeof tabLabel == 'string') {
+            const text = tabLabel;
+            tabLabel = new LabelPanel(vec2.create());
+            tabLabel.text = text;
+        }
+        this.insertChild(tabLabel);
+        this.content = content;
+    }
+};
+
 export class TabsViewPanel extends TilingPanel {
-    constructor(position, size, defaultContent) {
+    constructor(position, size) {
         super(position, size);
         this.axis = 1;
         this.sizeAlongAxis = -1;
@@ -1031,19 +1050,23 @@ export class TabsViewPanel extends TilingPanel {
         this.otherAxisAlignment = 'stretch';
         this.enableTabDragging = true;
         this.header = new ClippingViewPanel(vec2.create(), vec2.create());
-        this.header.registerActionEvent(() => {
-            this.tabsContainer.activeButton = undefined;
-        });
         this.insertChild(this.header);
         this.tabsContainer = new RadioButtonsPanel(vec2.create(), vec2.create(), false);
         this.header.insertChild(this.tabsContainer);
         this.tabsContainer.axis = 1-this.axis;
         this.tabsContainer.interChildSpacing = 4;
         this.tabsContainer.addEventListener('change', () => {
-            this.replaceChild(this.children[1], (this.tabsContainer.activeButton) ? this.tabsContainer.activeButton.content : this.defaultContent);
+            if(!this.tabsContainer.activeButton) {
+                this.tabsContainer.activeButton = this.tabsContainer.children[this.tabsContainer.children.length>>1];
+                return;
+            }
+            if(this.children.length > 1)
+                this.replaceChild(this.children[1], this.tabsContainer.activeButton.content);
+            else
+                this.insertChild(this.tabsContainer.activeButton.content);
         });
         this.registerDropEvent(
-            (tabHandle) => this.enableTabDragging && tabHandle instanceof ButtonPanel && tabHandle.backgroundPanel.node.classList.contains('tabHandle'),
+            (tabHandle) => this.enableTabDragging && tabHandle instanceof TabPanel,
             (tabHandle) => {
                 let index = 0;
                 const containerPosition = this.tabsContainer.getRootPosition();
@@ -1053,8 +1076,6 @@ export class TabsViewPanel extends TilingPanel {
                 this.addTab(tabHandle, true, index);
             }
         );
-        this.defaultContent = defaultContent;
-        this.insertChild(this.defaultContent);
         this.backgroundPanel = new RectPanel(vec2.create(), vec2.create());
         this.backgroundPanel.cornerRadius = 5;
         this.registerFocusEvent(this.backgroundPanel.node);
@@ -1089,11 +1110,7 @@ export class TabsViewPanel extends TilingPanel {
     replaceChild(child, newChild) {
         if(child != this.children[1] || !super.replaceChild(child, newChild))
             return false;
-        if(this.tabsContainer.activeButton) {
-            this.tabsContainer.activeButton.content = newChild;
-        } else if(newChild != this.defaultContent) {
-            const tabHandle = this.createTab(undefined, newChild);
-        }
+        this.tabsContainer.activeButton.content = newChild;
         return true;
     }
 
@@ -1132,6 +1149,8 @@ export class TabsViewPanel extends TilingPanel {
         if(!this.tabsContainer.removeChild(tabHandle))
             return false;
         this.tabsContainer.recalculateLayout();
+        if(this.tabsContainer.children.length == 1)
+            this.parent.replaceChild(this, this.tabsContainer.activeButton.content);
         return true;
     }
 
@@ -1144,8 +1163,6 @@ export class TabsViewPanel extends TilingPanel {
             if(!this.enableTabDragging)
                 return;
             this.removeTab(tabHandle);
-            if(this.tabsContainer.children.length == 0)
-                this.parent.replaceChild(this, this.defaultContent);
             return tabHandle;
         });
         tabHandle.recalculateLayout();
@@ -1154,18 +1171,6 @@ export class TabsViewPanel extends TilingPanel {
             this.tabsContainer.recalculateLayout();
             this.tabsContainer.activeButton = tabHandle;
         }
-    }
-
-    createTab(tabLabel, content, activate=true) {
-        const tabHandle = new ButtonPanel(vec2.create(), 'tabHandle', new SpeechBalloonPanel(vec2.create(), vec2.create()));
-        if(!tabLabel) {
-            tabLabel = new LabelPanel(vec2.create());
-            tabLabel.text = 'Tab';
-        }
-        tabHandle.insertChild(tabLabel);
-        tabHandle.content = content;
-        this.addTab(tabHandle, activate);
-        return tabHandle;
     }
 }
 
@@ -1203,12 +1208,11 @@ export class InfiniteViewPanel extends ClippingViewPanel {
         });
         this.addEventListener('pointerstart', (event) => {
             event.position = this.backgroundPanel.relativePosition(event.position);
-            event.isSelectionRect = event.modifierKey && this.enableSelectionRect;
+            event.isSelectionRect = event.shiftKey && this.enableSelectionRect;
             if(!event.isSelectionRect) {
                 event.originalTranslation = this.contentTranslation;
                 event.prevTranslation = event.translation = vec2.clone(event.originalTranslation);
                 event.originalTranslation = this.contentTranslation;
-                event.prevTimestamp = performance.now();
             }
             return true;
         });
@@ -1230,11 +1234,9 @@ export class InfiniteViewPanel extends ClippingViewPanel {
                 vec2.add(event.translation, event.translation, event.originalTranslation);
                 this.setContentTransformation(event.translation, this.contentScale);
                 event.translation = this.contentTranslation;
-                const timestamp = performance.now();
                 vec2.sub(this.velocity, event.translation, event.prevTranslation);
-                vec2.scale(this.velocity, this.velocity, 1.0/(timestamp-event.prevTimestamp));
+                vec2.scale(this.velocity, this.velocity, 1.0/event.timeDiff);
                 vec2.copy(event.prevTranslation, event.translation);
-                event.prevTimestamp = timestamp;
             }
         });
         this.addEventListener('pointerend', (event) => {
@@ -1242,7 +1244,7 @@ export class InfiniteViewPanel extends ClippingViewPanel {
                 const bounds = this.selectionRect.getBounds();
                 vec2.transformMat2d(bounds[0], bounds[0], this.inverseContentTransform);
                 vec2.transformMat2d(bounds[1], bounds[1], this.inverseContentTransform);
-                this.contentPanel.selectChildrenInside(bounds[0], bounds[1], event.modifierKey);
+                this.contentPanel.dispatchEvent({'type': 'select', 'source': event.source, 'mode': (event.shiftKey ? 'inverse' : 'all'), 'propagateTo': 'children', 'bounds': bounds});
                 this.removeChildAnimated(this.selectionRect);
                 delete this.selectionRect;
             } else
@@ -1376,6 +1378,7 @@ export class SliderPanel extends ContainerPanel {
             this.insertChild(this.textFieldPanel);
             this.textFieldPanel.text = this.labelPanel.text;
             this.textFieldPanel.embeddedNode.focus();
+            return true;
         });
         this.addEventListener('pointerstart', (event) => {
             event.originalValue = this.value;

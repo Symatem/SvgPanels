@@ -127,14 +127,9 @@ export class Panel {
         }
     }
 
-    selectIfInside(min, max, toggle) {
+    isInside(min, max) {
         const bounds = this.getBounds();
-        if(min[0] > bounds[0][0] || min[1] > bounds[0][1] || max[0] < bounds[1][0] || max[1] < bounds[1][1])
-            return;
-        if(toggle)
-            this.selected = !this.selected;
-        else
-            this.selected = true;
+        return (min[0] <= bounds[0][0] && bounds[1][0] <= max[0]) && (min[1] <= bounds[0][1] && bounds[1][1] <= max[1]);
     }
 
     addEventListener(eventType, callback) {
@@ -144,11 +139,30 @@ export class Panel {
     dispatchEvent(event) {
         event.target = event.originalTarget = this;
         while(event.target) {
-            if(event.target.eventListeners[event.type])
+            if(event.target.eventListeners[event.type]) {
+                delete event.propagateTo;
                 return event.target.eventListeners[event.type](event);
-            if(!event.bubbles)
-                return;
-            event.target = event.target.parent;
+            }
+            switch(event.propagateTo) {
+                case 'parent':
+                    event.target = event.target.parent;
+                    break;
+                case 'children': {
+                    if(!this.children)
+                        return;
+                    const childEvent = Object.assign({}, event);
+                    for(const child of this.children) {
+                        if(event.bounds) {
+                            childEvent.bounds = [vec2.create(), vec2.create()];
+                            vec2.sub(childEvent.bounds[0], event.bounds[0], child.position);
+                            vec2.sub(childEvent.bounds[1], event.bounds[1], child.position);
+                        }
+                        child.dispatchEvent(childEvent);
+                    }
+                }
+                default:
+                    return;
+            }
         }
     }
 
@@ -160,6 +174,40 @@ export class Panel {
     relativePosition(position) {
         const bounds = this.node.getBoundingClientRect();
         return vec2.fromValues(position[0]-bounds.x-bounds.width*0.5, position[1]-bounds.y-bounds.height*0.5);
+    }
+
+    actionOrSelect(event) {
+        event.type = 'toolbarcontext';
+        event.propagateTo = 'parent';
+        this.dispatchEvent(event);
+        if(event.shiftKey) {
+            event.type = 'select';
+            event.propagateTo = 'parent';
+            event.mode = 'inverse';
+            this.dispatchEvent(event);
+        } else {
+            event.type = 'action';
+            event.propagateTo = 'parent';
+            if(!this.dispatchEvent(event)) {
+                this.root.toolBarPanel.contextSelect('none', event);
+                event.type = 'select';
+                event.mode = 'all';
+                this.dispatchEvent(event);
+            }
+        }
+    }
+
+    registerSelectEvent(onSelect) {
+        this.addEventListener('select', (event) => {
+            if(event.bounds && !this.isInside(event.bounds[0], event.bounds[1]))
+                return;
+            if(event.mode == 'inverse')
+                this.selected = !this.selected;
+            else
+                this.selected = (event.mode == 'all');
+            if(onSelect)
+                onSelect(event);
+        });
     }
 
     registerDragEvent(onDragStart) {
@@ -182,7 +230,7 @@ export class Panel {
             if(event.item) {
                 vec2.add(event.item.position, event.offset, event.position);
                 event.item.updatePosition();
-                document.body.style.cursor = this.constructor.dispatchEvent({'type': 'mayDrop', 'bubbles': true, 'position': event.position, 'item': event.item}) ? 'alias' : 'no-drop';
+                document.body.style.cursor = this.constructor.dispatchEvent({'type': 'mayDrop', 'propagateTo': 'parent', 'position': event.position, 'item': event.item}) ? 'alias' : 'no-drop';
             }
         });
         this.addEventListener('pointerend', (event) => {
@@ -190,7 +238,7 @@ export class Panel {
                 document.body.style.cursor = '';
                 event.item.node.classList.remove('disabled');
                 this.root.overlays.removeChild(event.item);
-                this.constructor.dispatchEvent({'type': 'drop', 'bubbles': true, 'position': event.position, 'item': event.item});
+                this.constructor.dispatchEvent({'type': 'drop', 'propagateTo': 'parent', 'position': event.position, 'item': event.item});
             }
         });
     }
@@ -207,7 +255,10 @@ export class Panel {
 
     registerActionEvent(action) {
         this.addEventListener('pointerstart', (event) => true);
-        this.addEventListener('action', action);
+        this.addEventListener('action', (event) => {
+            action(event);
+            return true;
+        });
     }
 
     registerFocusEvent(focusNode) {
@@ -218,7 +269,7 @@ export class Panel {
             if(this.root.focusedPanel)
                 this.root.focusedPanel.dispatchEvent({'type': 'defocus'});
             this.root.focusedPanel = this;
-            this.root.focusedPanel.dispatchEvent({'type': 'movefocusinview', 'bubbles': true, 'source': event.source, 'item': this});
+            this.root.focusedPanel.dispatchEvent({'type': 'movefocusinview', 'propagateTo': 'parent', 'source': event.source, 'item': this});
         });
         this.addEventListener('defocus', (event) => {
             focusNode.classList.remove('focused');

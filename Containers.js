@@ -50,11 +50,12 @@ export class ContainerPanel extends Panel {
             newIndex += this.children.length+1;
         if(!child || (child.parent && child.parent != this) || newIndex < 0)
             return false;
-        let oldIndex;
+        let oldIndex, insertBefore = this.children[newIndex];
         if(child.parent == this) {
             oldIndex = this.children.indexOf(child);
             if(oldIndex == -1 || oldIndex == newIndex || newIndex >= this.children.length)
                 return false;
+            insertBefore = this.children[(newIndex == oldIndex+1) ? newIndex+1 : newIndex];
             this.children.splice(oldIndex, 1);
         } else {
             if(newIndex > this.children.length)
@@ -67,7 +68,7 @@ export class ContainerPanel extends Panel {
             if(newIndex == this.children.length)
                 this.node.appendChild(child.node);
             else
-                this.node.insertBefore(child.node, this.children[(newIndex == oldIndex+1) ? newIndex+1 : newIndex].node);
+                this.node.insertBefore(child.node, insertBefore.node);
         }
         this.children.splice(newIndex, 0, child);
         return true;
@@ -417,6 +418,50 @@ export class ClippingViewPanel extends ContainerPanel {
     }
 }
 
+function registerlayoutSplitEvent(panel) {
+    panel.addEventListener('layoutsplit', (event) => {
+        const childToInsert = new PanePanel(vec2.create(), vec2.create(), true),
+              relativeSize = 0.5;
+        let container;
+        if(event.direction < 2) {
+            if(panel.parent instanceof SplitViewPanel && panel.parent.axis == event.direction)
+                container = panel.parent;
+            else if(panel instanceof SplitViewPanel && panel.axis == event.direction)
+                container = panel;
+        } else if(panel instanceof TabsViewPanel || panel.parent instanceof TabsViewPanel)
+            container = panel.parent instanceof TabsViewPanel ? panel.parent : panel;
+        const hadFocus = (panel.root.focusedPanel == container || panel.root.focusedPanel == panel);
+        if(container) {
+            if(event.direction < 2) {
+                if(container == panel)
+                    return;
+                container.splitChild(container.children.indexOf(panel), false, relativeSize, childToInsert);
+            } else
+                container.addTab(new TabPanel(childToInsert), true);
+        } else {
+            if(event.direction < 2) {
+                container = new SplitViewPanel(vec2.create(), vec2.create());
+                container.axis = event.direction;
+            } else {
+                container = new TabsViewPanel(vec2.create(), vec2.create());
+                container.addTab(new TabPanel(panel), false);
+                container.addTab(new TabPanel(childToInsert), true);
+            }
+            panel.parent.replaceChild(panel, container);
+            if(event.direction < 2) {
+                panel.relativeSize = 1.0-relativeSize;
+                childToInsert.relativeSize = relativeSize;
+                container.insertChild(panel);
+                container.insertChild(childToInsert);
+            }
+            container.recalculateLayout();
+        }
+        childToInsert.dispatchEvent({'type': 'toolbarcontext'});
+        if(hadFocus)
+            childToInsert.dispatchEvent({'type': 'focus'});
+    });
+}
+
 export class PanePanel extends ClippingViewPanel {
     constructor(position, size) {
         super(position, size);
@@ -441,48 +486,13 @@ export class PanePanel extends ClippingViewPanel {
                     }}
                 ))});
         });
-        this.addEventListener('layoutsplit', (event) => {
-            const childToInsert = new PanePanel(vec2.create(), vec2.create(), true),
-                  relativeSize = 0.5;
-            if(this.parent instanceof ConfigurableSplitViewPanel && this.parent.axis == event.direction)
-                this.parent.splitChild(this.parent.children.indexOf(this), false, relativeSize, childToInsert);
-            else {
-                let container;
-                if(event.direction == 2) {
-                    if(this.parent instanceof TabsViewPanel) {
-                        container = this.parent;
-                        const hadFocus = (this.root.focusedPanel == this);
-                        container.addTab(new TabPanel(childToInsert), true);
-                        if(hadFocus)
-                            childToInsert.dispatchEvent({'type': 'focus'});
-                        childToInsert.dispatchEvent({'type': 'toolbarcontext'});
-                        return;
-                    } else {
-                        container = new TabsViewPanel(vec2.create(), vec2.create());
-                        container.addTab(new TabPanel(this), false);
-                        container.addTab(new TabPanel(childToInsert), true);
-                    }
-                } else {
-                    container = new ConfigurableSplitViewPanel(vec2.create(), vec2.create());
-                    container.axis = event.direction;
-                }
-                this.parent.replaceChild(this, container);
-                if(event.direction < 2) {
-                    this.relativeSize = 1.0-relativeSize;
-                    childToInsert.relativeSize = relativeSize;
-                    container.insertChild(this);
-                    container.insertChild(childToInsert);
-                }
-                container.recalculateLayout();
-            }
-            childToInsert.dispatchEvent({'type': 'toolbarcontext'});
-        });
         this.registerDropEvent(
             (tabHandle) => tabHandle instanceof TabPanel,
             (tabHandle) => {
                 this.parent.replaceChild(this, tabHandle.content);
             }
         );
+        registerlayoutSplitEvent(this);
     }
 
     updateSize() {
@@ -835,96 +845,116 @@ export class ToolbarPanel extends TilingPanel {
     }
 }
 
-export class ConfigurableSplitViewPanel extends TilingPanel {
+export class SplitViewResizeHandlePanel extends RectPanel {
+    constructor(axis) {
+        super(vec2.create(), vec2.create());
+        this.registerFocusEvent(this.node);
+        this.addEventListener('move', (event) => {
+            event.prevChild.size[this.parent.axis] = event.prevChildOriginalSize+event.translation;
+            event.prevChild.updateSize();
+            event.nextChild.size[this.parent.axis] = event.nextChildOriginalSize-event.translation;
+            event.nextChild.updateSize();
+            this.position[this.parent.axis] = event.originalPosition+event.translation;
+            this.updatePosition();
+            event.prevChild.position[this.parent.axis] = this.position[this.parent.axis]-0.5*(event.prevChild.size[this.parent.axis]+this.size[this.parent.axis]);
+            event.prevChild.updatePosition();
+            event.nextChild.position[this.parent.axis] = this.position[this.parent.axis]+0.5*(event.nextChild.size[this.parent.axis]+this.size[this.parent.axis]);
+            event.nextChild.updatePosition();
+            event.prevChild.relativeSize = event.relativeSizeSum*event.prevChild.size[this.parent.axis]/event.absoluteSizeSum;
+            event.nextChild.relativeSize = event.relativeSizeSum-event.prevChild.relativeSize;
+        });
+        this.addEventListener('pointerstart', (event) => {
+            event.position = this.parent.backgroundPanel.relativePosition(event.position);
+            return true;
+        });
+        this.addEventListener('pointermove', (event) => {
+            if(!event.moved)
+                this.prepareMove(event);
+            event.position = this.parent.backgroundPanel.relativePosition(event.position);
+            event.translation = Math.max(-event.prevChildOriginalSize, Math.min(event.nextChildOriginalSize, event.position[this.parent.axis]-event.startPosition[this.parent.axis]));
+            event.type = 'move';
+            this.dispatchEvent(event);
+        });
+        this.addEventListener('pointerend', this.finishMove.bind(this));
+    }
+
+    recalculateLayout() {
+        this.node.classList.add((this.parent.axis == 0) ? 'horizontalResizingHandle' : 'verticalResizingHandle');
+        this.size[this.parent.axis] = this.parent.resizingHandleWidth;
+        this.size[1-this.parent.axis] = this.parent.size[1-this.parent.axis];
+        this.updateSize();
+        super.recalculateLayout();
+    }
+
+    prepareMove(event) {
+        const splitIndex = this.parent.children.indexOf(this);
+        event.prevChild = this.parent.children[splitIndex-1];
+        event.nextChild = this.parent.children[splitIndex+1];
+        event.originalPosition = this.position[this.parent.axis];
+        event.prevChildOriginalSize = event.prevChild.size[this.parent.axis];
+        event.nextChildOriginalSize = event.nextChild.size[this.parent.axis];
+        event.absoluteSizeSum = event.prevChildOriginalSize+event.nextChildOriginalSize;
+        event.relativeSizeSum = event.prevChild.relativeSize+event.nextChild.relativeSize;
+    }
+
+    finishMove(event) {
+        const childToMerge = (event.prevChild.relativeSize < event.nextChild.relativeSize) ? event.prevChild : event.nextChild,
+              childToMergeInto = (childToMerge == event.nextChild) ? event.prevChild : event.nextChild;
+        if(this.parent.mergeSizeThreshold > 0 && childToMerge.size[this.parent.axis] < this.parent.mergeSizeThreshold) {
+            if(this.root.focusedPanel == this)
+                childToMergeInto.dispatchEvent({'type': 'focus'});
+            this.parent.mergeChildren(this.parent.children.indexOf(childToMerge), childToMerge == event.nextChild);
+        }
+    }
+
+    move(translation) {
+        const event = {'type': 'move', 'translation': translation};
+        this.prepareMove(event);
+        this.dispatchEvent(event);
+        this.finishMove(event);
+    }
+}
+
+export class SplitViewPanel extends TilingPanel {
     constructor(position, size) {
         super(position, size);
         this.sizeAlongAxis = 'centering';
         this.otherAxisSizeStays = true;
         this.otherAxisAlignment = 'stretch';
-        this.interChildSpacing = 3;
-        this.enableSplitAndMerge = true;
-        this.splitHandleSize = 20;
+        this.resizingHandleWidth = 3;
         this.mergeSizeThreshold = 10;
+        this.moveStepSize = 10;
         this.backgroundPanel = new RectPanel(vec2.create(), vec2.create());
         this.backgroundPanel.cornerRadius = 5;
-        this.addEventListener('pointerstart', (event) => {
-            event.position = this.backgroundPanel.relativePosition(event.position);
-            const position = event.position[this.axis];
-            event.splitIndex = 0;
-            while(event.splitIndex < this.children.length && this.children[event.splitIndex].position[this.axis] < position)
-                ++event.splitIndex;
-            event.mode = 'move';
-            if(this.enableSplitAndMerge) {
-                const sizeOtherAxis = (this.size[1-this.axis]-this.padding[this.axis])*0.5;
-                if(event.position[1-this.axis] > sizeOtherAxis-this.splitHandleSize) {
-                    if(event.splitIndex == 0)
-                        return false;
-                    event.mode = 'insertBefore';
-                    return true;
-                } else if(event.position[1-this.axis] < this.splitHandleSize-sizeOtherAxis) {
-                    if(event.splitIndex == this.children.length)
-                        return false;
-                    event.mode = 'insertAfter';
-                    return true;
-                }
-            }
-            return event.splitIndex > 0 && event.splitIndex < this.children.length;
-        });
-        this.addEventListener('pointermove', (event) => {
-            if(!event.moved) {
-                if(event.mode != 'move') {
-                    this.splitChild(event.splitIndex, event.mode == 'insertBefore', 0.0);
-                    if(event.mode == 'insertAfter')
-                        ++event.splitIndex;
-                }
-                event.prevChild = this.children[event.splitIndex-1];
-                event.nextChild = this.children[event.splitIndex];
-                event.prevChildOriginalPosition = event.prevChild.position[this.axis];
-                event.nextChildOriginalPosition = event.nextChild.position[this.axis];
-                event.prevChildOriginalSize = event.prevChild.size[this.axis];
-                event.nextChildOriginalSize = event.nextChild.size[this.axis];
-                event.absoluteSizeSum = event.prevChildOriginalSize+event.nextChildOriginalSize;
-                event.relativeSizeSum = event.prevChild.relativeSize+event.nextChild.relativeSize;
-            }
-            event.position = this.backgroundPanel.relativePosition(event.position);
-            const diff = Math.max(-event.prevChildOriginalSize, Math.min(event.nextChildOriginalSize, event.position[this.axis]-event.startPosition[this.axis]));
-            event.prevChild.position[this.axis] = event.prevChildOriginalPosition+diff*0.5;
-            event.prevChild.updatePosition();
-            event.nextChild.position[this.axis] = event.nextChildOriginalPosition+diff*0.5;
-            event.nextChild.updatePosition();
-            event.prevChild.size[this.axis] = event.prevChildOriginalSize+diff;
-            event.prevChild.updateSize();
-            event.nextChild.size[this.axis] = event.nextChildOriginalSize-diff;
-            event.nextChild.updateSize();
-            event.prevChild.relativeSize = event.relativeSizeSum*event.prevChild.size[this.axis]/event.absoluteSizeSum;
-            event.nextChild.relativeSize = event.relativeSizeSum-event.prevChild.relativeSize;
-        });
-        this.addEventListener('pointerend', (event) => {
-            const childToMerge = (event.prevChild.relativeSize < event.nextChild.relativeSize) ? event.prevChild : event.nextChild;
-            if(this.enableSplitAndMerge && childToMerge.size[this.axis] < this.mergeSizeThreshold)
-                this.mergeChildren(this.children.indexOf(childToMerge), childToMerge == event.nextChild);
-        });
         this.registerFocusEvent(this.backgroundPanel.node);
         this.registerFocusNavigationEvent();
-        this.addEventListener('layoutreplace', (event) => {
+        this.addEventListener('layoutmove', (event) => {
             const axis = (event.direction == 'left' || event.direction == 'right') ? 0 : 1,
                   indexIncrement = (event.direction == 'left' || event.direction == 'up' ? -1 : 1)*(this.reverse ? -1 : 1),
-                  index = this.children.indexOf(event.originalTarget)+indexIncrement;
-            if(this.axis == axis && this.children[index])
-                this.mergeChildren(index, indexIncrement == 1);
+                  index = this.children.indexOf(event.originalTarget);
+            if(this.axis != axis)
+                return;
+            if(index%2 == 1)
+                this.children[index].move(indexIncrement*this.moveStepSize);
+            else if(this.children[index+indexIncrement*2])
+                this.mergeChildren(index+indexIncrement*2, indexIncrement > 0);
         });
+        registerlayoutSplitEvent(this);
+    }
+
+    getChildSizeSum() {
+        return this.size[this.axis]-(this.children.length>>1)*this.resizingHandleWidth-this.padding[this.axis]*2;
+    }
+
+    normalizeRelativeSizes() {
+        const childSizeSum = this.getChildSizeSum();
+        for(let i = 0; i < this.children.length; i += 2)
+            this.children[i].relativeSize = this.children[i].size[this.axis]/childSizeSum;
     }
 
     recalculateLayout() {
-        if(this.axis == 0) {
-            this.backgroundPanel.node.classList.add('horizontalResizingHandle');
-            this.backgroundPanel.node.classList.remove('verticalResizingHandle');
-        } else {
-            this.backgroundPanel.node.classList.add('verticalResizingHandle');
-            this.backgroundPanel.node.classList.remove('horizontalResizingHandle');
-        }
-        const childSizeSum = this.size[this.axis]-(this.children.length-1)*this.interChildSpacing-this.padding[this.axis]*2;
-        for(let i = 0; i < this.children.length; ++i) {
+        const childSizeSum = this.getChildSizeSum();
+        for(let i = 0; i < this.children.length; i += 2) {
             const child = this.children[i],
                   childSize = childSizeSum*this.children[i].relativeSize;
             if(child.size[this.axis] != childSize) {
@@ -935,19 +965,16 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
         super.recalculateLayout();
     }
 
-    normalizeRelativeSizes() {
-        let childSizeSum = 0;
-        for(const child of this.children)
-            childSizeSum += child.size[this.axis];
-        for(const child of this.children)
-            child.relativeSize = child.size[this.axis]/childSizeSum;
-    }
-
-    splitChild(index, before, relativeSize, childToInsert=new PanePanel(vec2.create(), vec2.create())) {
-        const childToSplit = this.children[before ? index-1 : index],
-              sizeToSplit = childToSplit.size[this.axis]-this.interChildSpacing;
+    splitChild(index, before, relativeSize, childToInsert) {
+        const childToSplit = this.children[index],
+              sizeToSplit = childToSplit.size[this.axis]-this.resizingHandleWidth,
+              resizingHandle = new SplitViewResizeHandlePanel();
         let translation = childToSplit.size[this.axis];
-        this.insertChild(childToInsert, index);
+        super.insertChild(childToInsert, before ? index+1 : index);
+        super.insertChild(resizingHandle, index+1);
+        resizingHandle.recalculateLayout();
+        resizingHandle.position[this.axis] = childToSplit.position[this.axis]+translation*(relativeSize-0.5);
+        resizingHandle.updatePosition();
         childToInsert.size[this.axis] = sizeToSplit*relativeSize;
         childToInsert.size[1-this.axis] = childToSplit.size[1-this.axis];
         childToSplit.size[this.axis] = sizeToSplit-childToInsert.size[this.axis];
@@ -958,24 +985,35 @@ export class ConfigurableSplitViewPanel extends TilingPanel {
         childToInsert.position[1-this.axis] = childToSplit.position[1-this.axis];
         childToInsert.position[this.axis] += translation;
         childToSplit.position[this.axis] -= translation;
-        childToInsert.position[this.axis] = childToSplit.position[this.axis]+(sizeToSplit*0.5+this.interChildSpacing)*(before ? 1 : -1);
+        childToInsert.position[this.axis] = childToSplit.position[this.axis]+(sizeToSplit*0.5+this.resizingHandleWidth)*(before ? 1 : -1);
         childToSplit.updatePosition();
         childToInsert.updatePosition();
         this.normalizeRelativeSizes();
     }
 
     mergeChildren(index, before) {
-        const childToMergeInto = this.children[before ? index-1 : index+1],
+        const childToMergeInto = this.children[before ? index-2 : index+2],
               childToMerge = this.children[index];
-        childToMergeInto.size[this.axis] += childToMerge.size[this.axis]+this.interChildSpacing;
+        childToMergeInto.size[this.axis] += childToMerge.size[this.axis]+this.resizingHandleWidth;
         childToMergeInto.updateSize();
-        childToMergeInto.position[this.axis] += (childToMerge.size[this.axis]+this.interChildSpacing)*(before ? 0.5 : -0.5);
+        childToMergeInto.position[this.axis] += (childToMerge.size[this.axis]+this.resizingHandleWidth)*(before ? 0.5 : -0.5);
         childToMergeInto.updatePosition();
+        this.removeChild(this.children[before ? index-1 : index+1]);
         this.removeChild(childToMerge);
+        this.normalizeRelativeSizes();
         if(this.children.length == 1)
             this.parent.replaceChild(this, this.children[0]);
-        else
-            this.normalizeRelativeSizes();
+    }
+
+    insertChild(child, index) {
+        if(!super.insertChild(child, index))
+            return false;
+        if(this.children.length > 1 && !index) {
+            const resizingHandle = new SplitViewResizeHandlePanel();
+            super.insertChild(resizingHandle, (index) ? index : this.children.length-1);
+            resizingHandle.recalculateLayout();
+        }
+        return true;
     }
 
     replaceChild(child, newChild) {
@@ -995,13 +1033,13 @@ export class RadioButtonsPanel extends TilingPanel {
             this.registerFocusNavigationEvent();
     }
 
-    insertChild(child, newIndex=-1) {
+    insertChild(child, index=-1) {
         child.registerActionEvent(() => {
             if(this.activeButton == child)
                 return;
             this.activeButton = child;
         });
-        return super.insertChild(child, newIndex);
+        return super.insertChild(child, index);
     }
 
     removeChild(child) {
@@ -1105,6 +1143,16 @@ export class TabsViewPanel extends TilingPanel {
             }
             return true;
         });
+        this.addEventListener('layoutmove', (event) => {
+            const axis = (event.direction == 'left' || event.direction == 'right') ? 1 : 0,
+                  indexIncrement = (event.direction == 'left' || event.direction == 'up' ? -1 : 1)*(this.reverse ? -1 : 1),
+                  index = this.tabsContainer.children.indexOf(event.originalTarget);
+            if(this.axis != axis || index == -1 || index+indexIncrement < 0 || index+indexIncrement >= this.tabsContainer.children.length)
+                return;
+            this.tabsContainer.insertChild(this.tabsContainer.children[index], index+indexIncrement);
+            this.tabsContainer.recalculateLayout();
+        });
+        registerlayoutSplitEvent(this);
     }
 
     replaceChild(child, newChild) {

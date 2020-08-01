@@ -211,13 +211,14 @@ export class RootPanel extends ContainerPanel {
                 'difference': vec2.fromValues(event.deltaX, event.deltaY)
             });
         };
-        let pointerEvent;
         const distanceToZoom = 300,
               millisecondsToMove = 100,
               millisecondsToContext = 300;
         this.node.onmousedown = this.node.ontouchstart = (event) => {
             refineEvent(event);
-            pointerEvent = {
+            if(this.sustainedEvent)
+                return;
+            this.sustainedEvent = {
                 'type': 'pointerstart',
                 'propagateTo': 'parent',
                 'source': 'pointer',
@@ -226,64 +227,75 @@ export class RootPanel extends ContainerPanel {
                 'moved': false,
                 'beginTime': performance.now()
             };
-            pointerEvent.currentTime = pointerEvent.beginTime;
+            this.sustainedEvent.currentTime = this.sustainedEvent.beginTime;
             if(event.touches) {
-                pointerEvent.primaryTouchID = event.touches[0].identifier;
-                pointerEvent.zoomPointerDifference = dualPointerDifference(event);
-                if(vec2.length(pointerEvent.zoomPointerDifference) < distanceToZoom)
-                    delete pointerEvent.zoomPointerDifference;
+                this.sustainedEvent.primaryTouchID = event.touches[0].identifier;
+                this.sustainedEvent.zoomPointerDifference = dualPointerDifference(event);
+                if(vec2.length(this.sustainedEvent.zoomPointerDifference) < distanceToZoom)
+                    delete this.sustainedEvent.zoomPointerDifference;
             } else
-                delete pointerEvent.zoomPointerDifference;
-            if(Panel.dispatchEvent(pointerEvent)) {
-                pointerEvent.target = pointerEvent.target || pointerEvent.originalTarget;
-                pointerEvent.startPosition = pointerEvent.position;
+                delete this.sustainedEvent.zoomPointerDifference;
+            if(Panel.dispatchEvent(this.sustainedEvent)) {
+                this.sustainedEvent.target = this.sustainedEvent.target || this.sustainedEvent.originalTarget;
+                this.sustainedEvent.startPosition = this.sustainedEvent.position;
             } else
-                pointerEvent = undefined;
+                this.sustainedEvent = undefined;
         };
         this.node.onmousemove = this.node.ontouchmove = (event) => {
             refineEvent(event);
-            if(!pointerEvent)
+            if(!this.sustainedEvent)
                 return;
             const now = performance.now();
-            pointerEvent.timeDiff = now-pointerEvent.currentTime;
-            pointerEvent.currentTime = now;
-            if(pointerEvent.currentTime-pointerEvent.beginTime < millisecondsToMove)
+            this.sustainedEvent.timeDiff = now-this.sustainedEvent.currentTime;
+            this.sustainedEvent.currentTime = now;
+            if(this.sustainedEvent.currentTime-this.sustainedEvent.beginTime < millisecondsToMove)
                 return;
-            pointerEvent.shiftKey = event.shiftKey;
-            if(pointerEvent.zoomPointerDifference) {
+            this.sustainedEvent.shiftKey = event.shiftKey;
+            this.sustainedEvent.position = event.pointers[0].position;
+            if(this.sustainedEvent.zoomPointerDifference) {
                 const dist = dualPointerDifference(event);
                 if(vec2.length(dist) > 0 && onZoom) {
                     const center = vec2.create();
                     vec2.add(center, event.pointers[0].position, event.pointers[1].position);
                     vec2.scale(center, center, 0.5);
-                    pointerEvent.type = 'pointerzoom';
-                    pointerEvent.position = center;
-                    pointerEvent.factor = vec2.length(dist)/vec2.length(pointerEvent.zoomPointerDifference);
-                    pointerEvent.zoomPointerDifference = dist;
-                    pointerEvent.target.dispatchEvent(pointerEvent);
+                    this.sustainedEvent.type = 'pointerzoom';
+                    this.sustainedEvent.position = center;
+                    this.sustainedEvent.factor = vec2.length(dist)/vec2.length(this.sustainedEvent.zoomPointerDifference);
+                    this.sustainedEvent.zoomPointerDifference = dist;
+                    this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
                 }
-            } else {
-                pointerEvent.type = 'pointermove';
-                pointerEvent.position = event.pointers[0].position;
-                pointerEvent.target.dispatchEvent(pointerEvent);
+            } else if(!this.sustainedEvent.item && !this.sustainedEvent.moved) {
+                this.sustainedEvent.type = 'drag';
+                this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
             }
-            pointerEvent.moved = true;
+            if(this.sustainedEvent.item) {
+                vec2.add(this.sustainedEvent.item.position, this.sustainedEvent.offset, this.sustainedEvent.position);
+                this.sustainedEvent.item.updatePosition();
+                const maydrop = this.constructor.dispatchEvent({'type': 'maydrop', 'propagateTo': 'parent', 'position': this.sustainedEvent.position, 'item': this.sustainedEvent.item});
+                document.body.style.cursor = maydrop ? 'alias' : 'no-drop';
+            } else {
+                this.sustainedEvent.type = 'pointermove';
+                this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
+            }
+            this.sustainedEvent.moved = true;
         };
         this.node.onmouseup = this.node.ontouchend = this.node.onmouseleave = this.node.ontouchleave = this.node.ontouchcancel = (event) => {
             refineEvent(event);
-            if(!pointerEvent || (event.touches && event.touches.length > 0 && pointerEvent.primaryTouchID != event.changedTouches[0].identifier))
+            if(!this.sustainedEvent || (event.touches && event.touches.length > 0 && this.sustainedEvent.primaryTouchID != event.changedTouches[0].identifier))
                 return;
             const now = performance.now();
-            pointerEvent.timeDiff = now-pointerEvent.currentTime;
-            pointerEvent.currentTime = now;
-            if(pointerEvent.moved) {
-                pointerEvent.type = 'pointerend';
-                pointerEvent.shiftKey = event.shiftKey;
-                pointerEvent.position = event.pointers[0].position;
-                pointerEvent.target.dispatchEvent(pointerEvent);
+            this.sustainedEvent.timeDiff = now-this.sustainedEvent.currentTime;
+            this.sustainedEvent.currentTime = now;
+            if(this.sustainedEvent.item)
+                this.drop(this.sustainedEvent);
+            else if(this.sustainedEvent.moved) {
+                this.sustainedEvent.type = 'pointerend';
+                this.sustainedEvent.shiftKey = event.shiftKey;
+                this.sustainedEvent.position = event.pointers[0].position;
+                this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
             } else
-                pointerEvent.target.actionOrSelect(pointerEvent);
-            pointerEvent = undefined;
+                this.sustainedEvent.target.actionOrSelect(this.sustainedEvent);
+            this.sustainedEvent = undefined;
         };
     }
 
@@ -338,6 +350,45 @@ export class RootPanel extends ContainerPanel {
             else
                 this.node.requestFullscreen();
         }
+    }
+
+    drag(onDrag, event) {
+        if(this.sustainedEvent && event != this.sustainedEvent)
+            return;
+        const rootPosition = this.getRootPosition(),
+              positioned = (event == this.sustainedEvent);
+        this.sustainedEvent = event;
+        event.item = onDrag();
+        if(!event.item)
+            return;
+        event.offset = vec2.create();
+        vec2.scaleAndAdd(event.offset, event.offset, this.size, -0.5);
+        if(positioned) {
+            if(Object.getPrototypeOf(this) == Object.getPrototypeOf(event.item))
+                vec2.sub(event.offset, rootPosition, event.startPosition);
+        } else {
+            vec2.scale(event.item.position, event.item.position, 0.0);
+            event.item.updatePosition();
+        }
+        event.item.node.classList.add('disabled');
+        this.overlays.insertChild(event.item);
+    }
+
+    drop(event) {
+        const positioned = (event == this.sustainedEvent);
+        event = this.sustainedEvent;
+        if(!event.item)
+            return;
+        document.body.style.cursor = '';
+        event.item.node.classList.remove('disabled');
+        this.overlays.removeChild(event.item);
+        event.type = 'drop';
+        event.propagateTo = 'parent';
+        if(positioned)
+            this.constructor.dispatchEvent(event);
+        else if(this.focusedPanel)
+            this.focusedPanel.dispatchEvent(event);
+        this.sustainedEvent = undefined;
     }
 }
 
@@ -1210,6 +1261,8 @@ export class TabsViewPanel extends TilingPanel {
         tabHandle.registerDragEvent(() => {
             if(!this.enableTabDragging)
                 return;
+            if(this.root.focusedPanel == tabHandle)
+                this.dispatchEvent({'type': 'focus'});
             this.removeTab(tabHandle);
             return tabHandle;
         });

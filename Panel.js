@@ -210,53 +210,27 @@ export class Panel {
         });
     }
 
-    registerDragEvent(onDragStart) {
-        this.addEventListener('pointerstart', (event) => true);
-        this.addEventListener('pointermove', (event) => {
-            if(!event.moved) {
-                const root = this.root,
-                      rootPosition = this.getRootPosition();
-                event.item = onDragStart();
-                if(event.item) {
-                    event.item.node.classList.add('disabled');
-                    root.overlays.insertChild(event.item);
-                    event.offset = vec2.create();
-                    if(Object.getPrototypeOf(this) == Object.getPrototypeOf(event.item))
-                        vec2.sub(event.offset, rootPosition, event.startPosition);
-                    else
-                        vec2.scaleAndAdd(event.offset, event.offset, root.size, -0.5);
-                }
-            }
-            if(event.item) {
-                vec2.add(event.item.position, event.offset, event.position);
-                event.item.updatePosition();
-                document.body.style.cursor = this.constructor.dispatchEvent({'type': 'mayDrop', 'propagateTo': 'parent', 'position': event.position, 'item': event.item}) ? 'alias' : 'no-drop';
-            }
-        });
-        this.addEventListener('pointerend', (event) => {
-            if(event.moved && event.item) {
-                document.body.style.cursor = '';
-                event.item.node.classList.remove('disabled');
-                this.root.overlays.removeChild(event.item);
-                this.constructor.dispatchEvent({'type': 'drop', 'propagateTo': 'parent', 'position': event.position, 'item': event.item});
-            }
-        });
-    }
-
-    registerDropEvent(acceptsDrop, onDrop) {
-        this.addEventListener('mayDrop', (event) => acceptsDrop(event.item));
-        this.addEventListener('drop', (event) => {
-            if(!acceptsDrop(event.item))
-                return false;
-            onDrop(event.item);
-            return true;
-        });
-    }
-
     registerActionEvent(action) {
         this.addEventListener('pointerstart', (event) => true);
         this.addEventListener('action', (event) => {
             action(event);
+            return true;
+        });
+    }
+
+    registerDragEvent(onDrag) {
+        this.addEventListener('pointerstart', (event) => true);
+        this.addEventListener('drag', (event) => {
+            this.root.drag(onDrag, event);
+        });
+    }
+
+    registerDropEvent(acceptsDrop, onDrop) {
+        this.addEventListener('maydrop', (event) => acceptsDrop(event.item));
+        this.addEventListener('drop', (event) => {
+            if(!acceptsDrop(event.item))
+                return false;
+            onDrop(event.item);
             return true;
         });
     }

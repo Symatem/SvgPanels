@@ -143,24 +143,23 @@ const keyModifiers = ['alt', 'ctrl', 'meta', 'shift'],
     '⌫': 8, '↹': 9, '⌧': 12, '↵': 13, '⏎': 13, '␣': 32, '⇞': 33, '⇟': 34, '↘': 35, '↖': 36, '←': 37, '↑': 38, '→': 39, '↓': 40, '⌦': 46
 };
 
-function refineEvent(event) {
-    if(keyModifiers.filter((modifier) => event[modifier+'Key']).length > 0)
-        event.preventDefault();
-    event.stopPropagation();
-    if(event.touches) {
-        event.shiftKey = (event.touches.length === 2);
-        event.pointers = event.changedTouches;
-    } else
-        event.pointers = [event];
-    for(const pointer of event.pointers)
-        pointer.position = vec2.fromValues(pointer.clientX, pointer.clientY);
-}
-
 function dualPointerDifference(event) {
     const diff = vec2.create();
     if(event.pointers.length == 2)
         vec2.sub(diff, event.pointers[0].position, event.pointers[1].position);
     return diff;
+}
+
+function refinePointerEvent(event) {
+    if(keyModifiers.filter((modifier) => event[modifier+'Key']).length > 0)
+        event.preventDefault();
+    event.stopPropagation();
+    return {
+        'source': 'pointer',
+        'pointers': (event.touches ? [...event.changedTouches] : [event]).map((pointer) => ({'position': vec2.fromValues(pointer.clientX, pointer.clientY)})),
+        'shiftKey': event.touches ? event.touches.length == 2 : event.shiftKey,
+        'currentTime': event.timeStamp
+    };
 }
 
 export class RootPanel extends ContainerPanel {
@@ -197,105 +196,50 @@ export class RootPanel extends ContainerPanel {
         const feMerge = Panel.createElement('feMerge', blurFilter);
         Panel.createElement('feMergeNode', feMerge).setAttribute('in', 'brighter');
         Panel.createElement('feMergeNode', feMerge).setAttribute('in', 'SourceGraphic');
-        this.node.ongesturestart = (event) => {
-            event.preventDefault();
-        };
+        this.distanceToZoom = 300,
+        this.millisecondsToMove = 100;
+        this.pointerEventIgoreTime = 100;
+        this.pointerEventMinTimeStamp = 0;
         this.node.onwheel = (event) => {
             event.preventDefault();
-            refineEvent(event);
+            const difference = vec2.fromValues(event.deltaX, event.deltaY);
+            event = refinePointerEvent(event);
             Panel.dispatchEvent({
                 'type': 'pointerzoom',
                 'propagateTo': 'parent',
                 'source': 'wheel',
                 'position': event.pointers[0].position,
-                'difference': vec2.fromValues(event.deltaX, event.deltaY)
+                'difference': difference
             });
         };
-        const distanceToZoom = 300,
-              millisecondsToMove = 100,
-              millisecondsToContext = 300;
-        this.node.onmousedown = this.node.ontouchstart = (event) => {
-            refineEvent(event);
-            if(this.sustainedEvent)
-                return;
-            this.sustainedEvent = {
-                'type': 'pointerstart',
-                'propagateTo': 'parent',
-                'source': 'pointer',
-                'shiftKey': event.shiftKey,
-                'position': event.pointers[0].position,
-                'moved': false,
-                'beginTime': performance.now()
-            };
-            this.sustainedEvent.currentTime = this.sustainedEvent.beginTime;
-            if(event.touches) {
-                this.sustainedEvent.primaryTouchID = event.touches[0].identifier;
-                this.sustainedEvent.zoomPointerDifference = dualPointerDifference(event);
-                if(vec2.length(this.sustainedEvent.zoomPointerDifference) < distanceToZoom)
-                    delete this.sustainedEvent.zoomPointerDifference;
-            } else
-                delete this.sustainedEvent.zoomPointerDifference;
-            if(Panel.dispatchEvent(this.sustainedEvent)) {
-                this.sustainedEvent.target = this.sustainedEvent.target || this.sustainedEvent.originalTarget;
-                this.sustainedEvent.startPosition = this.sustainedEvent.position;
-            } else
-                this.sustainedEvent = undefined;
+        this.node.onmousedown = (event) => {
+            if(this.pointerEventMinTimeStamp < event.timeStamp)
+                this.pointerStart(event);
         };
-        this.node.onmousemove = this.node.ontouchmove = (event) => {
-            refineEvent(event);
-            if(!this.sustainedEvent)
-                return;
-            const now = performance.now();
-            this.sustainedEvent.timeDiff = now-this.sustainedEvent.currentTime;
-            this.sustainedEvent.currentTime = now;
-            if(this.sustainedEvent.currentTime-this.sustainedEvent.beginTime < millisecondsToMove)
-                return;
-            this.sustainedEvent.shiftKey = event.shiftKey;
-            this.sustainedEvent.position = event.pointers[0].position;
-            if(this.sustainedEvent.zoomPointerDifference) {
-                const dist = dualPointerDifference(event);
-                if(vec2.length(dist) > 0 && onZoom) {
-                    const center = vec2.create();
-                    vec2.add(center, event.pointers[0].position, event.pointers[1].position);
-                    vec2.scale(center, center, 0.5);
-                    this.sustainedEvent.type = 'pointerzoom';
-                    this.sustainedEvent.position = center;
-                    this.sustainedEvent.factor = vec2.length(dist)/vec2.length(this.sustainedEvent.zoomPointerDifference);
-                    this.sustainedEvent.zoomPointerDifference = dist;
-                    this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
-                }
-            } else if(!this.sustainedEvent.item && !this.sustainedEvent.moved) {
-                this.sustainedEvent.type = 'drag';
-                this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
-            }
-            if(this.sustainedEvent.item) {
-                vec2.add(this.sustainedEvent.item.position, this.sustainedEvent.offset, this.sustainedEvent.position);
-                this.sustainedEvent.item.updatePosition();
-                const maydrop = this.constructor.dispatchEvent({'type': 'maydrop', 'propagateTo': 'parent', 'position': this.sustainedEvent.position, 'item': this.sustainedEvent.item});
-                document.body.style.cursor = maydrop ? 'alias' : 'no-drop';
-            } else {
-                this.sustainedEvent.type = 'pointermove';
-                this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
-            }
-            this.sustainedEvent.moved = true;
+        this.node.onmousemove = (event) => {
+            if(this.pointerEventMinTimeStamp < event.timeStamp)
+                this.pointerMove(event);
         };
-        this.node.onmouseup = this.node.ontouchend = this.node.onmouseleave = this.node.ontouchleave = this.node.ontouchcancel = (event) => {
-            refineEvent(event);
-            if(!this.sustainedEvent || (event.touches && event.touches.length > 0 && this.sustainedEvent.primaryTouchID != event.changedTouches[0].identifier))
-                return;
-            const now = performance.now();
-            this.sustainedEvent.timeDiff = now-this.sustainedEvent.currentTime;
-            this.sustainedEvent.currentTime = now;
-            if(this.sustainedEvent.item)
-                this.drop(this.sustainedEvent);
-            else if(this.sustainedEvent.moved) {
-                this.sustainedEvent.type = 'pointerend';
-                this.sustainedEvent.shiftKey = event.shiftKey;
-                this.sustainedEvent.position = event.pointers[0].position;
-                this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
-            } else
-                this.sustainedEvent.target.actionOrSelect(this.sustainedEvent);
-            this.sustainedEvent = undefined;
+        this.node.onmouseup = this.node.onmouseleave = (event) => {
+            if(this.pointerEventMinTimeStamp < event.timeStamp)
+                this.pointerEnd(event);
+        };
+        this.node.ontouchstart = (event) => {
+            this.pointerStart(event);
+            this.pointerEventMinTimeStamp = event.timeStamp+this.pointerEventIgoreTime;
+        };
+        this.node.ontouchmove = (event) => {
+            event.preventDefault();
+            this.pointerMove(event);
+            this.pointerEventMinTimeStamp = event.timeStamp+this.pointerEventIgoreTime;
+        };
+        this.node.ontouchend = this.node.ontouchleave = this.node.ontouchcancel = (event) => {
+            if(event.touches.length == 0 || this.sustainedEvent.primaryTouchID == event.changedTouches[0].identifier)
+                this.pointerEnd(event);
+            this.pointerEventMinTimeStamp = event.timeStamp+this.pointerEventIgoreTime;
+        };
+        this.node.ongesturestart = (event) => {
+            event.preventDefault();
         };
     }
 
@@ -350,6 +294,90 @@ export class RootPanel extends ContainerPanel {
             else
                 this.node.requestFullscreen();
         }
+    }
+
+    pointerStart(event) {
+        event = refinePointerEvent(event);
+        if(this.sustainedEvent)
+            return;
+        this.sustainedEvent = {
+            'type': 'pointerstart',
+            'propagateTo': 'parent',
+            'source': 'pointer',
+            'shiftKey': event.shiftKey,
+            'position': event.pointers[0].position,
+            'moved': false,
+            'beginTime': event.currentTime,
+            'currentTime': event.currentTime
+        };
+        if(event.touches) {
+            this.sustainedEvent.primaryTouchID = event.touches[0].identifier;
+            this.sustainedEvent.zoomPointerDifference = dualPointerDifference(event);
+            if(vec2.length(this.sustainedEvent.zoomPointerDifference) < this.distanceToZoom)
+                delete this.sustainedEvent.zoomPointerDifference;
+        } else
+            delete this.sustainedEvent.zoomPointerDifference;
+        if(Panel.dispatchEvent(this.sustainedEvent)) {
+            this.sustainedEvent.target = this.sustainedEvent.target || this.sustainedEvent.originalTarget;
+            this.sustainedEvent.startPosition = this.sustainedEvent.position;
+        } else
+            this.sustainedEvent = undefined;
+    }
+
+    pointerMove(event) {
+        event = refinePointerEvent(event);
+        if(!this.sustainedEvent)
+            return;
+        this.sustainedEvent.timeDiff = event.currentTime-this.sustainedEvent.currentTime;
+        this.sustainedEvent.currentTime = event.currentTime;
+        if(this.sustainedEvent.currentTime-this.sustainedEvent.beginTime < this.millisecondsToMove)
+            return;
+        this.sustainedEvent.shiftKey = event.shiftKey;
+        this.sustainedEvent.position = event.pointers[0].position;
+        if(this.sustainedEvent.zoomPointerDifference) {
+            const dist = dualPointerDifference(event);
+            if(vec2.length(dist) > 0 && onZoom) {
+                const center = vec2.create();
+                vec2.add(center, event.pointers[0].position, event.pointers[1].position);
+                vec2.scale(center, center, 0.5);
+                this.sustainedEvent.type = 'pointerzoom';
+                this.sustainedEvent.position = center;
+                this.sustainedEvent.factor = vec2.length(dist)/vec2.length(this.sustainedEvent.zoomPointerDifference);
+                this.sustainedEvent.zoomPointerDifference = dist;
+                this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
+            }
+        } else if(!this.sustainedEvent.item && !this.sustainedEvent.moved) {
+            this.sustainedEvent.type = 'drag';
+            this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
+        }
+        if(this.sustainedEvent.item) {
+            vec2.add(this.sustainedEvent.item.position, this.sustainedEvent.offset, this.sustainedEvent.position);
+            this.sustainedEvent.item.updatePosition();
+            const maydrop = this.constructor.dispatchEvent({'type': 'maydrop', 'propagateTo': 'parent', 'position': this.sustainedEvent.position, 'item': this.sustainedEvent.item});
+            document.body.style.cursor = maydrop ? 'alias' : 'no-drop';
+        } else {
+            this.sustainedEvent.type = 'pointermove';
+            this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
+        }
+        this.sustainedEvent.moved = true;
+    }
+
+    pointerEnd(event) {
+        event = refinePointerEvent(event);
+        if(!this.sustainedEvent)
+            return;
+        this.sustainedEvent.timeDiff = event.currentTime-this.sustainedEvent.currentTime;
+        this.sustainedEvent.currentTime = event.currentTime;
+        if(this.sustainedEvent.item)
+            this.drop(this.sustainedEvent);
+        else if(this.sustainedEvent.moved) {
+            this.sustainedEvent.type = 'pointerend';
+            this.sustainedEvent.shiftKey = event.shiftKey;
+            this.sustainedEvent.position = event.pointers[0].position;
+            this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
+        } else
+            this.sustainedEvent.target.actionOrSelect(this.sustainedEvent);
+        this.sustainedEvent = undefined;
     }
 
     drag(onDrag, event) {

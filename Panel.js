@@ -127,11 +127,6 @@ export class Panel {
         }
     }
 
-    isInside(min, max) {
-        const bounds = this.getBounds();
-        return (min[0] <= bounds[0][0] && bounds[1][0] <= max[0]) && (min[1] <= bounds[0][1] && bounds[1][1] <= max[1]);
-    }
-
     addEventListener(eventType, callback) {
         this.eventListeners[eventType] = callback;
     }
@@ -148,7 +143,10 @@ export class Panel {
                     event.target = event.target.parent;
                     break;
                 case 'children': {
-                    if(!this.children)
+                    if(!this.children || (event.bounds && (
+                        event.bounds[1][0] <= -0.5*event.target.size[0] || 0.5*event.target.size[0] <= event.bounds[0][0] ||
+                        event.bounds[1][1] <= -0.5*event.target.size[1] || 0.5*event.target.size[1] <= event.bounds[0][1]
+                    )))
                         return;
                     const childEvent = Object.assign({}, event);
                     for(const child of this.children) {
@@ -159,8 +157,7 @@ export class Panel {
                         }
                         child.dispatchEvent(childEvent);
                     }
-                }
-                default:
+                } default:
                     return;
             }
         }
@@ -199,7 +196,10 @@ export class Panel {
 
     registerSelectEvent(onSelect) {
         this.addEventListener('select', (event) => {
-            if(event.bounds && !this.isInside(event.bounds[0], event.bounds[1]))
+            if(event.bounds && (
+                event.bounds[0][0] > -0.5*event.target.size[0] || 0.5*event.target.size[0] > event.bounds[1][0] ||
+                event.bounds[0][1] > -0.5*event.target.size[1] || 0.5*event.target.size[1] > event.bounds[1][1]
+            ))
                 return;
             if(event.mode == 'inverse')
                 this.selected = !this.selected;

@@ -143,25 +143,6 @@ const keyModifiers = ['alt', 'ctrl', 'meta', 'shift'],
     '⌫': 8, '↹': 9, '⌧': 12, '↵': 13, '⏎': 13, '␣': 32, '⇞': 33, '⇟': 34, '↘': 35, '↖': 36, '←': 37, '↑': 38, '→': 39, '↓': 40, '⌦': 46
 };
 
-function dualPointerDifference(event) {
-    const diff = vec2.create();
-    if(event.pointers.length == 2)
-        vec2.sub(diff, event.pointers[0].position, event.pointers[1].position);
-    return diff;
-}
-
-function refinePointerEvent(event) {
-    if(keyModifiers.filter((modifier) => event[modifier+'Key']).length > 0)
-        event.preventDefault();
-    event.stopPropagation();
-    return {
-        'source': 'pointer',
-        'pointers': (event.touches ? [...event.changedTouches] : [event]).map((pointer) => ({'position': vec2.fromValues(pointer.clientX, pointer.clientY)})),
-        'shiftKey': event.touches ? event.touches.length == 2 : event.shiftKey,
-        'currentTime': event.timeStamp
-    };
-}
-
 export class RootPanel extends ContainerPanel {
     constructor(parentNode, size) {
         super(vec2.create(), size, Panel.createElement('svg', parentNode));
@@ -198,49 +179,22 @@ export class RootPanel extends ContainerPanel {
         Panel.createElement('feMergeNode', feMerge).setAttribute('in', 'SourceGraphic');
         this.distanceToZoom = 300,
         this.millisecondsToMove = 100;
-        this.pointerEventIgoreTime = 100;
-        this.pointerEventMinTimeStamp = 0;
+        this.pointers = {};
         this.node.onwheel = (event) => {
             event.preventDefault();
             const difference = vec2.fromValues(event.deltaX, event.deltaY);
-            event = refinePointerEvent(event);
+            event = this.refinePointerEvent(event);
             Panel.dispatchEvent({
                 'type': 'pointerzoom',
                 'propagateTo': 'parent',
                 'source': 'wheel',
-                'position': event.pointers[0].position,
+                'position': event.position,
                 'difference': difference
             });
         };
-        this.node.onmousedown = (event) => {
-            if(this.pointerEventMinTimeStamp < event.timeStamp)
-                this.pointerStart(event);
-        };
-        this.node.onmousemove = (event) => {
-            if(this.pointerEventMinTimeStamp < event.timeStamp)
-                this.pointerMove(event);
-        };
-        this.node.onmouseup = this.node.onmouseleave = (event) => {
-            if(this.pointerEventMinTimeStamp < event.timeStamp)
-                this.pointerEnd(event);
-        };
-        this.node.ontouchstart = (event) => {
-            this.pointerStart(event);
-            this.pointerEventMinTimeStamp = event.timeStamp+this.pointerEventIgoreTime;
-        };
-        this.node.ontouchmove = (event) => {
-            event.preventDefault();
-            this.pointerMove(event);
-            this.pointerEventMinTimeStamp = event.timeStamp+this.pointerEventIgoreTime;
-        };
-        this.node.ontouchend = this.node.ontouchleave = this.node.ontouchcancel = (event) => {
-            if(event.touches.length == 0 || this.sustainedEvent.primaryTouchID == event.changedTouches[0].identifier)
-                this.pointerEnd(event);
-            this.pointerEventMinTimeStamp = event.timeStamp+this.pointerEventIgoreTime;
-        };
-        this.node.ongesturestart = (event) => {
-            event.preventDefault();
-        };
+        this.node.onpointerdown = this.pointerStart.bind(this);
+        this.node.onpointermove = this.pointerMove.bind(this);
+        this.node.onpointerup = this.pointerEnd.bind(this);
     }
 
     recalculateLayout() {
@@ -296,23 +250,37 @@ export class RootPanel extends ContainerPanel {
         }
     }
 
+    refinePointerEvent(event) {
+        if(keyModifiers.filter((modifier) => event[modifier+'Key']).length > 0)
+            event.preventDefault();
+        event.stopPropagation();
+        return {
+            'source': 'pointer',
+            'pointerId': event.pointerId,
+            'position': vec2.fromValues(event.clientX, event.clientY),
+            'shiftKey': Object.keys(this.pointers).length == 2 || event.shiftKey,
+            'currentTime': event.timeStamp
+        };
+    }
+
+    dualPointerDifference() {
+        const difference = vec2.create();
+        vec2.sub(difference, this.pointers[0].position, this.pointers[1].position);
+        return difference;
+    }
+
     pointerStart(event) {
-        event = refinePointerEvent(event);
+        event = this.refinePointerEvent(event);
+        this.pointers[event.pointerId] = event;
         if(this.sustainedEvent)
             return;
-        this.sustainedEvent = {
-            'type': 'pointerstart',
-            'propagateTo': 'parent',
-            'source': 'pointer',
-            'shiftKey': event.shiftKey,
-            'position': event.pointers[0].position,
-            'moved': false,
-            'beginTime': event.currentTime,
-            'currentTime': event.currentTime
-        };
-        if(event.touches) {
-            this.sustainedEvent.primaryTouchID = event.touches[0].identifier;
-            this.sustainedEvent.zoomPointerDifference = dualPointerDifference(event);
+        this.sustainedEvent = event;
+        this.sustainedEvent.type = 'pointerstart';
+        this.sustainedEvent.propagateTo = 'parent';
+        this.sustainedEvent.moved = false;
+        this.sustainedEvent.beginTime = this.sustainedEvent.currentTime;
+        if(Object.keys(this.pointers).length == 2) {
+            this.sustainedEvent.zoomPointerDifference = this.dualPointerDifference();
             if(vec2.length(this.sustainedEvent.zoomPointerDifference) < this.distanceToZoom)
                 delete this.sustainedEvent.zoomPointerDifference;
         } else
@@ -325,20 +293,20 @@ export class RootPanel extends ContainerPanel {
     }
 
     pointerMove(event) {
-        event = refinePointerEvent(event);
+        event = this.refinePointerEvent(event);
+        this.pointers[event.pointerId] = event;
         if(!this.sustainedEvent)
             return;
-        this.sustainedEvent.timeDiff = event.currentTime-this.sustainedEvent.currentTime;
-        this.sustainedEvent.currentTime = event.currentTime;
+        const timeDiff = event.currentTime-this.sustainedEvent.currentTime;
+        Object.assign(this.sustainedEvent, event);
+        this.sustainedEvent.timeDiff = event.timeDiff;
         if(this.sustainedEvent.currentTime-this.sustainedEvent.beginTime < this.millisecondsToMove)
             return;
-        this.sustainedEvent.shiftKey = event.shiftKey;
-        this.sustainedEvent.position = event.pointers[0].position;
-        if(this.sustainedEvent.zoomPointerDifference) {
-            const dist = dualPointerDifference(event);
+        if(Object.keys(this.pointers).length == 2 && this.sustainedEvent.zoomPointerDifference) {
+            const dist = this.dualPointerDifference();
             if(vec2.length(dist) > 0 && onZoom) {
                 const center = vec2.create();
-                vec2.add(center, event.pointers[0].position, event.pointers[1].position);
+                vec2.add(center, this.pointers[0].position, this.pointers[1].position);
                 vec2.scale(center, center, 0.5);
                 this.sustainedEvent.type = 'pointerzoom';
                 this.sustainedEvent.position = center;
@@ -363,17 +331,16 @@ export class RootPanel extends ContainerPanel {
     }
 
     pointerEnd(event) {
-        event = refinePointerEvent(event);
-        if(!this.sustainedEvent)
+        event = this.refinePointerEvent(event);
+        delete this.pointers[event.pointerId];
+        if(!this.sustainedEvent || event.pointerId > 0)
             return;
-        this.sustainedEvent.timeDiff = event.currentTime-this.sustainedEvent.currentTime;
-        this.sustainedEvent.currentTime = event.currentTime;
+        const timeDiff = event.currentTime-this.sustainedEvent.currentTime;
+        Object.assign(this.sustainedEvent, event);
         if(this.sustainedEvent.item)
             this.drop(this.sustainedEvent);
         else if(this.sustainedEvent.moved) {
             this.sustainedEvent.type = 'pointerend';
-            this.sustainedEvent.shiftKey = event.shiftKey;
-            this.sustainedEvent.position = event.pointers[0].position;
             this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
         } else
             this.sustainedEvent.target.actionOrSelect(this.sustainedEvent);

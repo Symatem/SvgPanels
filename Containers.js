@@ -342,8 +342,10 @@ export class RootPanel extends ContainerPanel {
         else if(this.sustainedEvent.moved) {
             this.sustainedEvent.type = 'pointerend';
             this.sustainedEvent.target.dispatchEvent(this.sustainedEvent);
-        } else
+        } else {
+            this.sustainedEvent.propagateTo = 'parent';
             this.sustainedEvent.target.actionOrSelect(this.sustainedEvent);
+        }
         this.sustainedEvent = undefined;
     }
 
@@ -372,7 +374,7 @@ export class RootPanel extends ContainerPanel {
     drop(event) {
         const positioned = (event == this.sustainedEvent);
         event = this.sustainedEvent;
-        if(!event.item)
+        if(!event || !event.item)
             return;
         document.body.style.cursor = '';
         event.item.node.classList.remove('disabled');
@@ -405,12 +407,16 @@ export class AdaptiveSizeContainerPanel extends ContainerPanel {
         vec2.sub(minPosition, minPosition, this.padding);
         vec2.add(maxPosition, maxPosition, this.padding);
         vec2.sub(this.size, maxPosition, minPosition);
-        vec2.add(center, maxPosition, minPosition);
-        if(vec2.dot(center, center) > 0.0) {
-            vec2.scale(center, center, 0.5);
-            for(const child of this.children) {
-                vec2.sub(child.position, child.position, center);
-                child.updatePosition();
+        if(!isFinite(this.size[0]) || !isFinite(this.size[1]))
+            vec2.copy(this.size, center);
+        else {
+            vec2.add(center, maxPosition, minPosition);
+            if(vec2.dot(center, center) > 0.0) {
+                vec2.scale(center, center, 0.5);
+                for(const child of this.children) {
+                    vec2.sub(child.position, child.position, center);
+                    child.updatePosition();
+                }
             }
         }
         this.updateSize();
@@ -528,7 +534,9 @@ export class PanePanel extends ClippingViewPanel {
             if(this.root && this.root.toolBarPanel)
                 this.root.toolBarPanel.setContext(event, {'content': 'Context', 'children': this.constructor.paneTypes.map(entry => (
                     {'content': entry.name, 'shortCut': entry.shortCut, 'action': (event) => {
-                        this.parent.replaceChild(this, new entry.class(vec2.create()));
+                        const childToInsert = new entry.class(vec2.create());
+                        this.parent.replaceChild(this, childToInsert);
+                        childToInsert.dispatchEvent({'type': 'toolbarcontext'});
                     }}
                 ))});
         });
@@ -862,7 +870,7 @@ export class ToolbarPanel extends TilingPanel {
                 if(!this.root.focusedPanel)
                     this.dispatchEvent({'type': 'focus', 'source': event.source});
                 else if(!this.root.focusedPanel.dispatchEvent({'type': 'focusnavigation', 'source': event.source, 'direction': 'in'}))
-                    this.root.focusedPanel.actionOrSelect(event);
+                    this.root.focusedPanel.actionOrSelect({'source': event.source, 'propagateTo': 'parent'});
                 break;
             case 'out':
                 if(this.root.focusedPanel && this.root.focusedPanel.parent) {
@@ -887,7 +895,7 @@ export class ToolbarPanel extends TilingPanel {
 
     contextSelect(mode, event) {
         if(this.contextPanel)
-            this.contextPanel.dispatchEvent({'type': 'select', 'mode': mode, 'source': event.source, 'propagateTo': 'children'});
+            this.contextPanel.actionOrSelect({'source': event.source, 'propagateTo': 'children', 'mode': mode});
     }
 }
 
@@ -1340,7 +1348,7 @@ export class InfiniteViewPanel extends ClippingViewPanel {
                 const bounds = this.selectionRect.getBounds();
                 vec2.transformMat2d(bounds[0], bounds[0], this.inverseContentTransform);
                 vec2.transformMat2d(bounds[1], bounds[1], this.inverseContentTransform);
-                this.contentPanel.dispatchEvent({'type': 'select', 'source': event.source, 'mode': (event.shiftKey ? 'inverse' : 'all'), 'propagateTo': 'children', 'bounds': bounds});
+                this.contentPanel.actionOrSelect({'source': event.source, 'propagateTo': 'children', 'shiftKey': event.shiftKey, 'bounds': bounds});
                 this.removeChildAnimated(this.selectionRect);
                 delete this.selectionRect;
             } else

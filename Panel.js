@@ -174,24 +174,36 @@ export class Panel {
     }
 
     actionOrSelect(event) {
+        const action = !event.mode,
+              propagateTo = event.propagateTo;
         event.type = 'toolbarcontext';
         event.propagateTo = 'parent';
         this.dispatchEvent(event);
-        if(event.shiftKey) {
+        const mode = event.mode || (event.shiftKey ? 'inverse' : 'all');
+        if(mode == 'inverse') {
             event.type = 'select';
-            event.propagateTo = 'parent';
             event.mode = 'inverse';
+            event.propagateTo = propagateTo;
             this.dispatchEvent(event);
         } else {
-            event.type = 'action';
-            event.propagateTo = 'parent';
-            if(!this.dispatchEvent(event)) {
-                this.root.toolBarPanel.contextSelect('none', event);
-                event.type = 'select';
-                event.mode = 'all';
-                this.dispatchEvent(event);
+            if(action) {
+                event.type = 'action';
+                event.propagateTo = 'parent';
+                if(this.dispatchEvent(event))
+                    return;
             }
+            event.type = 'select';
+            if(mode == 'all' && propagateTo == 'parent') {
+                event.mode = 'none';
+                event.propagateTo = 'children';
+                this.root.toolBarPanel.contextPanel.dispatchEvent(event);
+            }
+            event.mode = mode;
+            event.propagateTo = propagateTo;
+            this.dispatchEvent(event);
         }
+        event.type = 'selectionchange';
+        this.root.toolBarPanel.contextPanel.dispatchEvent(event);
     }
 
     registerSelectEvent(onSelect) {

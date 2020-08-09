@@ -132,11 +132,12 @@ export class Panel {
     }
 
     dispatchEvent(event) {
+        let result;
         event.target = event.originalTarget = this;
         while(event.target) {
             if(event.target.eventListeners[event.type]) {
                 delete event.propagateTo;
-                return event.target.eventListeners[event.type](event);
+                result = event.target.eventListeners[event.type](event);
             }
             switch(event.propagateTo) {
                 case 'parent':
@@ -147,7 +148,8 @@ export class Panel {
                         event.bounds[1][0] <= -0.5*event.target.size[0] || 0.5*event.target.size[0] <= event.bounds[0][0] ||
                         event.bounds[1][1] <= -0.5*event.target.size[1] || 0.5*event.target.size[1] <= event.bounds[0][1]
                     )))
-                        return;
+                        return result;
+                    result = [];
                     const childEvent = Object.assign({}, event);
                     for(const child of this.children) {
                         if(event.bounds) {
@@ -155,10 +157,10 @@ export class Panel {
                             vec2.sub(childEvent.bounds[0], event.bounds[0], child.position);
                             vec2.sub(childEvent.bounds[1], event.bounds[1], child.position);
                         }
-                        child.dispatchEvent(childEvent);
+                        result.push(child.dispatchEvent(childEvent));
                     }
                 } default:
-                    return;
+                    return result;
             }
         }
     }

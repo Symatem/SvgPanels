@@ -256,6 +256,7 @@ export class RootPanel extends ContainerPanel {
         event.stopPropagation();
         return {
             'source': 'pointer',
+            'isPrimary': event.isPrimary,
             'pointerId': event.pointerId,
             'position': vec2.fromValues(event.clientX, event.clientY),
             'shiftKey': Object.keys(this.pointers).length == 2 || event.shiftKey,
@@ -333,7 +334,7 @@ export class RootPanel extends ContainerPanel {
     pointerEnd(event) {
         event = this.refinePointerEvent(event);
         delete this.pointers[event.pointerId];
-        if(!this.sustainedEvent || event.pointerId > 0)
+        if(!this.sustainedEvent || !event.isPrimary)
             return;
         const timeDiff = event.currentTime-this.sustainedEvent.currentTime;
         Object.assign(this.sustainedEvent, event);

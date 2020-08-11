@@ -181,6 +181,33 @@ export class XhtmlPanel extends Panel {
     }
 }
 
+export class FileUploadPanel extends XhtmlPanel {
+    constructor(position, size) {
+        super(position, size, 'input');
+        this.embeddedNode.setAttribute('type', 'file');
+        this.embeddedNode.setAttribute('id', 'file');
+        this.labelNode = document.createElementNS('http://www.w3.org/1999/xhtml', 'label');
+        this.labelNode.setAttribute('for', 'file');
+        this.bodyElement.appendChild(this.labelNode);
+        this.registerFocusEvent(this.node);
+        this.embeddedNode.addEventListener('change', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.dispatchEvent({'type': 'change', 'source': 'pointer', 'files': event.target.files}); // TODO: Keyboard interaction
+        });
+        this.labelNode.addEventListener('drop', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.dispatchEvent({'type': 'change', 'source': 'pointer', 'files': event.dataTransfer.files});
+        });
+        this.labelNode.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = 'copy';
+        });
+    }
+}
+
 class TextPanel extends XhtmlPanel {
     constructor(position, size, tag) {
         super(position, size, tag);
@@ -206,7 +233,7 @@ class TextPanel extends XhtmlPanel {
         this.registerActionEvent((event) => {
             this.embeddedNode.focus();
         });
-        this.registerFocusEvent(this.embeddedNode);
+        this.registerFocusEvent(this.node);
     }
 
     get text() {

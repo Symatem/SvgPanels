@@ -194,6 +194,8 @@ export class Panel {
                 if(this.dispatchEvent(event))
                     return;
             }
+            if(!this.root.toolBarPanel.contextPanel)
+                return;
             event.type = 'select';
             if(mode == 'all' && propagateTo == 'parent') {
                 event.mode = 'none';
@@ -204,6 +206,8 @@ export class Panel {
             event.propagateTo = propagateTo;
             this.dispatchEvent(event);
         }
+        if(!this.root.toolBarPanel.contextPanel)
+            return;
         event.type = 'selectionchange';
         this.root.toolBarPanel.contextPanel.dispatchEvent(event);
     }
